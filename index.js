@@ -10,31 +10,36 @@ const app = express();
 const client = new line.Client(config);
 
 // ===== 設定 =====
-const admins = ['YOUR_USER_ID']; // 管理者ID入れる
+const admins = ['ここにあなたのユーザーID']; // ←後で入れる
 const ngWords = ['死ね', 'バカ', '消えろ'];
 
-// ===== ユーザーデータ保存 =====
+// ===== ユーザーデータ =====
 let userData = {};
 
-// ===== スパム検知用 =====
-const SPAM_LIMIT = 3;       // 同文連投回数
-const TIME_LIMIT = 5000;    // 5秒
+// ===== スパム設定 =====
+const SPAM_LIMIT = 3;
+const TIME_LIMIT = 5000;
 
+// ===== Webhook =====
 app.post('/webhook', line.middleware(config), (req, res) => {
   Promise.all(req.body.events.map(handleEvent))
     .then(() => res.end())
     .catch(() => res.end());
 });
 
+// ===== メイン処理 =====
 async function handleEvent(event) {
   if (event.type !== 'message') return Promise.resolve(null);
-  if (event.message.type !== 'text') return Promise.resolve(null);
 
   const userId = event.source.userId;
+
+  // ===== 画像・スタンプ無視 =====
+  if (event.message.type !== 'text') return Promise.resolve(null);
+
   const text = event.message.text;
   const now = Date.now();
 
-  // 初期化
+  // ===== 初期化 =====
   if (!userData[userId]) {
     userData[userId] = {
       warns: 0,
@@ -47,7 +52,12 @@ async function handleEvent(event) {
 
   const user = userData[userId];
 
-  // ===== ① NGワード検知 =====
+  // ===== ★ ID取得 =====
+  if (text === 'id') {
+    return reply(event, `あなたのID: ${userId}`);
+  }
+
+  // ===== ① NGワード =====
   if (ngWords.some(word => text.includes(word))) {
     user.warns++;
     return reply(event, `⚠️ NGワード検知（${user.warns}回目）`);
@@ -77,7 +87,7 @@ async function handleEvent(event) {
 
   // ===== ③ ブラックリスト =====
   if (user.blacklist) {
-    return reply(event, `⚠️ 要注意ユーザーです（監視中）`);
+    return reply(event, `⚠️ 要注意ユーザーです`);
   }
 
   // ===== ④ 管理者コマンド =====
@@ -87,32 +97,27 @@ async function handleEvent(event) {
       return reply(event, '権限がありません');
     }
 
-    // /警告
     if (text.startsWith('/警告')) {
       user.warns++;
-      return reply(event, `⚠️ 管理者警告（${user.warns}回目）`);
+      return reply(event, `⚠️ 管理者警告（${user.warns}回）`);
     }
 
-    // /追加
     if (text.startsWith('/追加')) {
       user.blacklist = true;
       return reply(event, 'ブラックリスト登録しました');
     }
 
-    // /解除
     if (text.startsWith('/解除')) {
       user.blacklist = false;
       return reply(event, 'ブラックリスト解除しました');
     }
 
-    // /ルール
     if (text.startsWith('/ルール')) {
       return reply(event,
         '【グループルール】\n' +
         '・暴言禁止\n' +
         '・荒らし禁止\n' +
-        '・連投禁止\n' +
-        '・違反は警告対象'
+        '・連投禁止'
       );
     }
   }
@@ -130,7 +135,7 @@ async function handleEvent(event) {
   return Promise.resolve(null);
 }
 
-// ===== 返信処理 =====
+// ===== 返信 =====
 function reply(event, text) {
   return client.replyMessage(event.replyToken, {
     type: 'text',
@@ -138,6 +143,7 @@ function reply(event, text) {
   });
 }
 
+// ===== 起動 =====
 app.listen(3000, () => {
   console.log('BOT起動中');
 });
