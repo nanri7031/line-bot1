@@ -10,7 +10,7 @@ const config = {
 const client = new line.Client(config);
 const app = express();
 
-// ===== データ保存 =====
+// ===== データ =====
 const DATA_FILE = './data.json';
 
 let db = {
@@ -26,170 +26,167 @@ if (fs.existsSync(DATA_FILE)) {
   db = JSON.parse(fs.readFileSync(DATA_FILE));
 }
 
-function saveDB() {
-  fs.writeFileSync(DATA_FILE, JSON.stringify(db, null, 2));
+function saveDB(){
+  fs.writeFileSync(DATA_FILE, JSON.stringify(db,null,2));
 }
 
 // ===== 状態 =====
 let pendingAction = {};
 let pendingRole = {};
 
-// ===== NGワード =====
+// ===== NG =====
 const NG_WORDS = ['死ね','バカ','消えろ','アホ'];
 
 // ===== webhook =====
-app.post('/webhook', line.middleware(config), (req, res) => {
+app.post('/webhook', line.middleware(config),(req,res)=>{
   Promise.all(req.body.events.map(handleEvent))
-    .then(() => res.json({ success: true }))
-    .catch(err => console.error(err));
+    .then(()=>res.json({}))
+    .catch(console.error);
 });
 
 // ===== メイン =====
-async function handleEvent(event) {
+async function handleEvent(event){
 
   const userId = event.source.userId;
 
-  // 🚨 緊急モード
-  if (db.emergencyMode && !isAdmin(userId)) {
-    return reply(event.replyToken, '🚨緊急モード中');
+  // 緊急モード
+  if(db.emergencyMode && !isAdmin(userId)){
+    return reply(event.replyToken,'🚨緊急モード中');
   }
 
   // BAN
-  if (db.bannedUsers[userId]) {
-    return reply(event.replyToken, '🚫制限中');
+  if(db.bannedUsers[userId]){
+    return reply(event.replyToken,'🚫制限中');
   }
 
-  if (event.type !== 'message') return null;
-  if (event.message.type !== 'text') return null;
+  if(event.type!=='message') return;
+  if(event.message.type!=='text') return;
 
   const text = event.message.text;
 
-  // ===== NG検知 =====
-  if (NG_WORDS.some(w => text.includes(w))) {
-    return violation(event, userId, text);
+  // NG
+  if(NG_WORDS.some(w=>text.includes(w))){
+    return violation(event,userId,text);
   }
 
-  // ===== コマンド =====
-  if (text === 'メニュー') return showMenu(event.replyToken);
-  if (text === '管理者一覧') return showAdminList(event.replyToken);
+  // コマンド
+  if(text==='メニュー') return showMenu(event.replyToken);
+  if(text==='管理者一覧') return showAdminList(event.replyToken);
 
-  if (text === '管理追加') {
-    if (!isAdmin(userId)) return;
-    pendingAction[userId] = 'add';
+  if(text==='管理追加'){
+    if(!isAdmin(userId)) return;
+    pendingAction[userId]='add';
     return showRoleMenu(event.replyToken);
   }
 
-  if (text === '管理削除') {
-    if (!isAdmin(userId)) return;
-    pendingAction[userId] = 'remove';
-    return reply(event.replyToken, '削除対象を@メンション');
+  if(text==='管理削除'){
+    if(!isAdmin(userId)) return;
+    pendingAction[userId]='remove';
+    return reply(event.replyToken,'@対象を指定');
   }
 
-  if (text === 'BAN解除') {
-    if (!isAdmin(userId)) return;
-    pendingAction[userId] = 'unban';
-    return reply(event.replyToken, '解除対象を@メンション');
+  if(text==='BAN解除'){
+    if(!isAdmin(userId)) return;
+    pendingAction[userId]='unban';
+    return reply(event.replyToken,'@対象を指定');
   }
 
-  if (text === '緊急ON') {
-    if (!isAdmin(userId)) return;
-    db.emergencyMode = true;
+  if(text==='緊急ON'){
+    if(!isAdmin(userId)) return;
+    db.emergencyMode=true;
     saveDB();
-    notifyAdmins('🚨緊急モードON');
-    return reply(event.replyToken, '🚨ON');
+    notifyAdmins('🚨緊急ON');
+    return reply(event.replyToken,'ON');
   }
 
-  if (text === '緊急OFF') {
-    if (!isAdmin(userId)) return;
-    db.emergencyMode = false;
+  if(text==='緊急OFF'){
+    if(!isAdmin(userId)) return;
+    db.emergencyMode=false;
     saveDB();
-    notifyAdmins('🟢緊急モード解除');
-    return reply(event.replyToken, '解除');
+    notifyAdmins('🟢解除');
+    return reply(event.replyToken,'OFF');
   }
 
-  if (['本管理','副管理','サポート'].includes(text)) {
-    if (pendingAction[userId] !== 'add') return;
-    pendingRole[userId] = text;
-    return reply(event.replyToken, '@対象を指定');
+  if(['本管理','副管理','サポート'].includes(text)){
+    if(pendingAction[userId]!=='add') return;
+    pendingRole[userId]=text;
+    return reply(event.replyToken,'@指定');
   }
 
-  // ===== メンション取得 =====
-  let targetId = null;
-  if (event.message.mentions) {
-    targetId = event.message.mentions.mentionees[0].userId;
+  // メンション取得
+  let targetId=null;
+  if(event.message.mentions){
+    targetId=event.message.mentions.mentionees[0].userId;
   }
 
-  if (targetId && pendingAction[userId]) {
+  if(targetId && pendingAction[userId]){
 
-    const action = pendingAction[userId];
-    const role = pendingRole[userId];
+    const action=pendingAction[userId];
+    const role=pendingRole[userId];
 
-    if (action === 'add') {
+    if(action==='add'){
       db[roleMap(role)].push(targetId);
       saveDB();
       clearPending(userId);
-      return reply(event.replyToken, '追加完了');
+      return reply(event.replyToken,'追加');
     }
 
-    if (action === 'remove') {
+    if(action==='remove'){
       removeUser(targetId);
       saveDB();
       clearPending(userId);
-      return reply(event.replyToken, '削除完了');
+      return reply(event.replyToken,'削除');
     }
 
-    if (action === 'unban') {
+    if(action==='unban'){
       delete db.bannedUsers[targetId];
-      db.violationCount[targetId] = 0;
+      db.violationCount[targetId]=0;
       saveDB();
       clearPending(userId);
-      return reply(event.replyToken, 'BAN解除');
+      return reply(event.replyToken,'解除');
     }
   }
-
-  return null;
 }
 
-// ===== 違反＋自動通報 =====
-function violation(event, userId, text) {
+// ===== 違反 =====
+function violation(event,userId,text){
 
-  db.violationCount[userId] = (db.violationCount[userId] || 0) + 1;
+  db.violationCount[userId]=(db.violationCount[userId]||0)+1;
 
-  notifyAdmins(`⚠️違反検知\nID:${userId}\n内容:${text}`);
+  notifyAdmins(`⚠️違反\n${text}`);
 
-  if (db.violationCount[userId] >= 3) {
-    db.bannedUsers[userId] = true;
-    notifyAdmins(`🚫BAN実行\nID:${userId}`);
+  if(db.violationCount[userId]>=3){
+    db.bannedUsers[userId]=true;
+    notifyAdmins('🚫BAN');
     saveDB();
-    return reply(event.replyToken, '🚫制限');
+    return reply(event.replyToken,'制限');
   }
 
   saveDB();
-  return reply(event.replyToken, '⚠️警告');
+  return reply(event.replyToken,'警告');
 }
 
-// ===== 管理者一覧（名前）=====
-async function showAdminList(token) {
+// ===== 管理者一覧 =====
+async function showAdminList(token){
 
   async function name(id){
-    try{
-      return (await client.getProfile(id)).displayName;
-    }catch{return id;}
+    try{return (await client.getProfile(id)).displayName;}
+    catch{return id;}
   }
 
-  let txt = "👑本管理\n";
-  for (let i of db.MAIN_ADMIN) txt += await name(i)+"\n";
+  let txt="👑本管理\n";
+  for(let i of db.MAIN_ADMIN) txt+=await name(i)+"\n";
 
-  txt += "\n🔧副管理\n";
-  for (let i of db.SUB_ADMIN) txt += await name(i)+"\n";
+  txt+="\n🔧副管理\n";
+  for(let i of db.SUB_ADMIN) txt+=await name(i)+"\n";
 
-  txt += "\n🛠サポート\n";
-  for (let i of db.SUPPORT) txt += await name(i)+"\n";
+  txt+="\n🛠サポート\n";
+  for(let i of db.SUPPORT) txt+=await name(i)+"\n";
 
-  return reply(token, txt);
+  return reply(token,txt);
 }
 
-// ===== メニュー =====
+// ===== メニュー（2列安定版）=====
 function showMenu(token){
   return client.replyMessage(token,{
     type:"flex",
@@ -201,25 +198,25 @@ function showMenu(token){
         layout:"vertical",
         spacing:"md",
         contents:[
-          row("👑","管理追加","#4A90E2","⚠️","通報","#FF4D4F","📋","管理一覧","#36CFC9"),
-          row("❌","管理削除","#722ED1","🔓","BAN解除","#FA8C16","🚨","緊急ON","#FF0000"),
-          row("🟢","緊急OFF","#00AA00","📜","ルール","#2F54EB","👥","管理者一覧","#666666")
+          row2("👑","管理追加","#4A90E2","⚠️","通報","#FF4D4F"),
+          row2("📋","管理一覧","#36CFC9","❌","管理削除","#722ED1"),
+          row2("🔓","BAN解除","#FA8C16","🚨","緊急ON","#FF0000"),
+          row2("🟢","緊急OFF","#00AA00","📜","ルール","#2F54EB")
         ]
       }
     }
   });
 }
 
-// ===== UI関数 =====
-function row(i1,t1,c1,i2,t2,c2,i3,t3,c3){
+// ===== UI =====
+function row2(i1,t1,c1,i2,t2,c2){
   return {
     type:"box",
     layout:"horizontal",
     spacing:"sm",
     contents:[
       panel(i1,t1,c1),
-      panel(i2,t2,c2),
-      panel(i3,t3,c3)
+      panel(i2,t2,c2)
     ]
   };
 }
@@ -238,8 +235,35 @@ function panel(icon,text,color){
       {type:"text",text:icon,size:"lg"},
       {type:"text",text:text,size:"xs",color:"#fff"}
     ],
-    action:{type:"message",label:text,text:text==="管理一覧"?"管理者一覧":text}
+    action:{
+      type:"message",
+      label:text,
+      text:text==="管理一覧"?"管理者一覧":text
+    }
   };
+}
+
+function showRoleMenu(token){
+  return client.replyMessage(token,{
+    type:"flex",
+    altText:"役職",
+    contents:{
+      type:"bubble",
+      body:{
+        type:"box",
+        layout:"vertical",
+        contents:[
+          btn("本管理"),
+          btn("副管理"),
+          btn("サポート")
+        ]
+      }
+    }
+  });
+}
+
+function btn(text){
+  return {type:"button",action:{type:"message",label:text,text:text}};
 }
 
 // ===== 共通 =====
