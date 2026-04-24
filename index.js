@@ -55,19 +55,20 @@ async function handleEvent(event){
 
   console.log("受信:", text);
 
-  // 緊急モード
+  // ===== 最優先：メニュー =====
+  if (text.includes('メニュー')) {
+    console.log("メニュー起動");
+    return showMenu(event.replyToken);
+  }
+
+  // ===== 緊急モード =====
   if(db.emergencyMode && !isAdmin(userId)){
     return reply(event.replyToken,'🚨緊急モード中');
   }
 
-  // BAN
+  // ===== BAN =====
   if(db.bannedUsers[userId]){
     return reply(event.replyToken,'🚫制限中');
-  }
-
-  // ===== メニュー（対策版）=====
-  if(text.includes('メニュー')){
-    return showMenu(event.replyToken);
   }
 
   // ===== 管理者一覧 =====
@@ -80,7 +81,7 @@ async function handleEvent(event){
     return violation(event,userId,text);
   }
 
-  // ===== 管理系 =====
+  // ===== 管理操作 =====
   if(text==='管理追加'){
     if(!isAdmin(userId)) return;
     pendingAction[userId]='add';
@@ -194,7 +195,7 @@ async function showAdminList(token){
   return reply(token,txt);
 }
 
-// ===== メニュー =====
+// ===== メニュー（2列安定）=====
 function showMenu(token){
   return client.replyMessage(token,{
     type:"flex",
