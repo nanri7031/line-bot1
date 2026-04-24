@@ -46,10 +46,25 @@ app.post('/webhook', line.middleware(config),(req,res)=>{
 // ===== メイン =====
 async function handleEvent(event){
 
+  const userId = event.source.userId;
+
+  // ===== 新規参加挨拶（最優先）=====
+  if (event.type === 'memberJoined') {
+    return reply(event.replyToken,
+`当グルに参加ありがとうございます😊
+
+まず最初にノートに書いてある
+ルールをよく読んで下さいね
+
+読みましたら必ずイイねをタップ！
+
+みんなと仲良くグルを楽しんで下さいね`);
+  }
+
+  // ===== メッセージ以外は無視 =====
   if(event.type !== 'message') return;
   if(event.message.type !== 'text') return;
 
-  const userId = event.source.userId;
   const text = event.message.text.trim();
 
   // ===== メニュー =====
@@ -77,21 +92,19 @@ async function handleEvent(event){
     return adminList(event.replyToken);
   }
 
-  // ===== 管理追加 =====
+  // ===== 管理操作 =====
   if(text === '管理追加'){
     if(!isAdmin(userId)) return;
     pending[userId] = 'add';
     return reply(event.replyToken,'追加したい人のメッセージに返信してください');
   }
 
-  // ===== 管理削除 =====
   if(text === '管理削除'){
     if(!isAdmin(userId)) return;
     pending[userId] = 'remove';
     return reply(event.replyToken,'削除したい人のメッセージに返信してください');
   }
 
-  // ===== BAN解除 =====
   if(text === 'BAN解除'){
     if(!isAdmin(userId)) return;
     pending[userId] = 'unban';
@@ -119,38 +132,33 @@ async function handleEvent(event){
     return reply(event.replyToken,'通報しました');
   }
 
-  // ===== 対象ユーザー取得（最重要修正）=====
+  // ===== 対象取得 =====
   let targetId = null;
 
-  // ▼ メンション
   if(event.message.mentions && event.message.mentions.mentionees.length > 0){
     targetId = event.message.mentions.mentionees[0].userId;
   }
 
-  // ▼ 返信（確実）
   if(event.message.quoteToken){
     targetId = event.source.userId;
   }
 
-  // ===== 管理処理 =====
+  // ===== 実行 =====
   if(targetId && pending[userId]){
 
-    // 自分防止
     if(targetId === userId){
       return reply(event.replyToken,'自分は対象にできません');
     }
 
-    // ===== 追加 =====
     if(pending[userId] === 'add'){
       if(!db.SUB_ADMIN.includes(targetId)){
         db.SUB_ADMIN.push(targetId);
-        save();
       }
+      save();
       pending[userId] = null;
       return reply(event.replyToken,'副管理追加しました');
     }
 
-    // ===== 削除 =====
     if(pending[userId] === 'remove'){
       remove(targetId);
       save();
@@ -158,7 +166,6 @@ async function handleEvent(event){
       return reply(event.replyToken,'削除しました');
     }
 
-    // ===== BAN解除 =====
     if(pending[userId] === 'unban'){
       delete db.bannedUsers[targetId];
       db.violationCount[targetId] = 0;
@@ -207,7 +214,7 @@ async function adminList(token){
   return reply(token, txt);
 }
 
-// ===== メニュー =====
+// ===== メニュー（2列UI）=====
 function showMenu(token){
   return client.replyMessage(token,{
     type:"flex",
@@ -217,14 +224,12 @@ function showMenu(token){
       body:{
         type:"box",
         layout:"vertical",
+        spacing:"md",
         contents:[
-          btn("👑 管理追加"),
-          btn("📋 管理者一覧"),
-          btn("❌ 管理削除"),
-          btn("🔓 BAN解除"),
-          btn("🚨 緊急ON"),
-          btn("🟢 緊急OFF"),
-          btn("⚠️ 通報")
+          row("👑 管理追加","⚠️ 通報"),
+          row("📋 管理者一覧","❌ 管理削除"),
+          row("🔓 BAN解除","🚨 緊急ON"),
+          row("🟢 緊急OFF","📜 ルール")
         ]
       }
     }
@@ -232,13 +237,23 @@ function showMenu(token){
 }
 
 // ===== UI =====
+function row(a,b){
+  return {
+    type:"box",
+    layout:"horizontal",
+    spacing:"sm",
+    contents:[btn(a),btn(b)]
+  };
+}
+
 function btn(text){
   return {
     type:"button",
+    style:"primary",
     action:{
       type:"message",
       label:text,
-      text:text.replace(/[👑📋❌🔓🚨🟢⚠️]/g,'').trim()
+      text:text.replace(/[👑⚠️📋❌🔓🚨🟢📜]/g,'').trim()
     }
   };
 }
@@ -264,5 +279,6 @@ function notifyAdmins(msg){
   });
 }
 
+// ===== 起動 =====
 const PORT = process.env.PORT || 3000;
 app.listen(PORT);
