@@ -32,8 +32,12 @@ function save(){
 
 // ===== 状態 =====
 let pending = {};
+let stampLog = {};
 
-// ===== NG =====
+// ===== 設定 =====
+const STAMP_LIMIT = 3;      // 何回で検知
+const STAMP_TIME = 5000;   // 秒（5秒）
+
 const NG = ['死ね','バカ','消えろ','アホ'];
 
 // ===== webhook =====
@@ -48,20 +52,30 @@ async function handleEvent(event){
 
   const userId = event.source.userId;
 
-  // ===== 新規参加挨拶（最優先）=====
+  // ===== 参加挨拶 =====
   if (event.type === 'memberJoined') {
     return reply(event.replyToken,
 `当グルに参加ありがとうございます😊
 
-まず最初にノートに書いてある
-ルールをよく読んで下さいね
-
-読みましたら必ずイイねをタップ！
-
-みんなと仲良くグルを楽しんで下さいね`);
+まずノートのルールを読んで下さい
+読んだらイイねお願いします！`);
   }
 
-  // ===== メッセージ以外は無視 =====
+  // ===== スタンプ検知 =====
+  if(event.type === 'message' && event.message.type === 'sticker'){
+
+    const now = Date.now();
+
+    stampLog[userId] = (stampLog[userId] || []).filter(t => now - t < STAMP_TIME);
+    stampLog[userId].push(now);
+
+    if(stampLog[userId].length >= STAMP_LIMIT){
+      return punish(userId, event.replyToken, "スタンプ連打");
+    }
+
+    return;
+  }
+
   if(event.type !== 'message') return;
   if(event.message.type !== 'text') return;
 
@@ -84,7 +98,7 @@ async function handleEvent(event){
 
   // ===== NG =====
   if(NG.some(w => text.includes(w))){
-    return violation(userId, event.replyToken);
+    return punish(userId, event.replyToken, "NGワード");
   }
 
   // ===== 管理者一覧 =====
@@ -96,19 +110,19 @@ async function handleEvent(event){
   if(text === '管理追加'){
     if(!isAdmin(userId)) return;
     pending[userId] = 'add';
-    return reply(event.replyToken,'追加したい人のメッセージに返信してください');
+    return reply(event.replyToken,'追加したい人に返信');
   }
 
   if(text === '管理削除'){
     if(!isAdmin(userId)) return;
     pending[userId] = 'remove';
-    return reply(event.replyToken,'削除したい人のメッセージに返信してください');
+    return reply(event.replyToken,'削除したい人に返信');
   }
 
   if(text === 'BAN解除'){
     if(!isAdmin(userId)) return;
     pending[userId] = 'unban';
-    return reply(event.replyToken,'解除したい人のメッセージに返信してください');
+    return reply(event.replyToken,'解除したい人に返信');
   }
 
   // ===== 緊急ON/OFF =====
@@ -147,7 +161,7 @@ async function handleEvent(event){
   if(targetId && pending[userId]){
 
     if(targetId === userId){
-      return reply(event.replyToken,'自分は対象にできません');
+      return reply(event.replyToken,'自分は対象不可');
     }
 
     if(pending[userId] === 'add'){
@@ -156,14 +170,14 @@ async function handleEvent(event){
       }
       save();
       pending[userId] = null;
-      return reply(event.replyToken,'副管理追加しました');
+      return reply(event.replyToken,'副管理追加');
     }
 
     if(pending[userId] === 'remove'){
       remove(targetId);
       save();
       pending[userId] = null;
-      return reply(event.replyToken,'削除しました');
+      return reply(event.replyToken,'削除');
     }
 
     if(pending[userId] === 'unban'){
@@ -171,50 +185,53 @@ async function handleEvent(event){
       db.violationCount[targetId] = 0;
       save();
       pending[userId] = null;
-      return reply(event.replyToken,'解除しました');
+      return reply(event.replyToken,'解除');
     }
   }
 }
 
-// ===== 違反 =====
-function violation(id, token){
-  db.violationCount[id] = (db.violationCount[id]||0)+1;
+// ===== 処罰 =====
+function punish(id, token, reason){
+
+  db.violationCount[id] = (db.violationCount[id] || 0) + 1;
+
+  notifyAdmins(`⚠️違反\n理由:${reason}\nID:${id}`);
 
   if(db.violationCount[id] >= 3){
     db.bannedUsers[id] = true;
     save();
-    return reply(token,'🚫制限');
+
+    kickUser(id);
+
+    return reply(token,'🚫強制退会');
   }
 
   save();
   return reply(token,'⚠️警告');
 }
 
+// ===== キック =====
+function kickUser(userId){
+  try{
+    client.leaveGroup(userId); // ※制限あり
+  }catch(e){
+    console.log("キック失敗", e);
+  }
+}
+
 // ===== 管理者一覧 =====
 async function adminList(token){
 
-  async function name(id){
-    try{
-      const p = await client.getProfile(id);
-      return p.displayName;
-    }catch{
-      return id;
-    }
-  }
-
   let txt = "👑本管理\n";
-  for(let i of db.MAIN_ADMIN) txt += await name(i)+"\n";
+  db.MAIN_ADMIN.forEach(id => txt += id+"\n");
 
   txt += "\n🔧副管理\n";
-  for(let i of db.SUB_ADMIN) txt += await name(i)+"\n";
-
-  txt += "\n🛠サポート\n";
-  for(let i of db.SUPPORT) txt += await name(i)+"\n";
+  db.SUB_ADMIN.forEach(id => txt += id+"\n");
 
   return reply(token, txt);
 }
 
-// ===== メニュー（2列UI）=====
+// ===== メニュー =====
 function showMenu(token){
   return client.replyMessage(token,{
     type:"flex",
@@ -241,7 +258,6 @@ function row(a,b){
   return {
     type:"box",
     layout:"horizontal",
-    spacing:"sm",
     contents:[btn(a),btn(b)]
   };
 }
@@ -279,6 +295,5 @@ function notifyAdmins(msg){
   });
 }
 
-// ===== 起動 =====
 const PORT = process.env.PORT || 3000;
 app.listen(PORT);
