@@ -10,7 +10,7 @@ const config = {
 const client = new line.Client(config);
 const app = express();
 
-// ===== データ =====
+// ===== データ保存 =====
 const FILE = './data.json';
 
 let db = {
@@ -30,8 +30,8 @@ function save(){
 }
 
 // ===== 状態 =====
-let pending = {};
 let stampLog = {};
+let pending = {};
 
 // ===== 設定 =====
 const NG = ['死ね','バカ','消えろ','アホ'];
@@ -45,7 +45,7 @@ app.post('/webhook', line.middleware(config),(req,res)=>{
     .catch(console.error);
 });
 
-// ===== メイン =====
+// ===== メイン処理 =====
 async function handleEvent(event){
 
   const userId = event.source.userId;
@@ -53,15 +53,14 @@ async function handleEvent(event){
   // ===== 新規参加 =====
   if(event.type === 'memberJoined'){
     return reply(event.replyToken,
-`当グルに参加ありがとうございます😊
-ルールを確認して下さい`);
+`参加ありがとうございます😊
+ルールを確認してください`);
   }
 
-  // ===== スタンプ検知 =====
+  // ===== スタンプ連打 =====
   if(event.type === 'message' && event.message.type === 'sticker'){
     const now = Date.now();
-
-    stampLog[userId] = (stampLog[userId] || []).filter(t => now - t < STAMP_TIME);
+    stampLog[userId] = (stampLog[userId]||[]).filter(t=>now-t<STAMP_TIME);
     stampLog[userId].push(now);
 
     if(stampLog[userId].length >= STAMP_LIMIT){
@@ -75,12 +74,12 @@ async function handleEvent(event){
 
   const text = event.message.text.trim();
 
-  // ===== メニュー =====
-  if(text.includes('メニュー') || text === 'm'){
+  // ===== メニュー表示 =====
+  if(text === 'メニュー' || text === 'm'){
     return showMenu(event.replyToken);
   }
 
-  // ===== 緊急 =====
+  // ===== 緊急モード =====
   if(db.emergencyMode && !isAdmin(userId)){
     return reply(event.replyToken,'🚨緊急モード中');
   }
@@ -90,17 +89,42 @@ async function handleEvent(event){
     return reply(event.replyToken,'🚫制限中');
   }
 
-  // ===== NG =====
-  if(NG.some(w => text.includes(w))){
+  // ===== NGワード =====
+  if(NG.some(w=>text.includes(w))){
     return punish(userId,event.replyToken,"NGワード");
   }
 
   // ===== 管理者一覧 =====
   if(text === '管理者一覧'){
-    return reply(event.replyToken,JSON.stringify(db,null,2));
+    return adminList(event.replyToken);
   }
 
-  // ===== 緊急 =====
+  // ===== ID表示 =====
+  if(text === '自分ID'){
+    return reply(event.replyToken,userId);
+  }
+
+  // ===== 管理追加 =====
+  if(text.startsWith('追加 ')){
+    if(!isAdmin(userId)) return;
+    const id = text.replace('追加 ','').trim();
+    if(!db.SUB_ADMIN.includes(id)){
+      db.SUB_ADMIN.push(id);
+      save();
+    }
+    return reply(event.replyToken,'副管理追加');
+  }
+
+  // ===== 削除 =====
+  if(text.startsWith('削除 ')){
+    if(!isAdmin(userId)) return;
+    const id = text.replace('削除 ','').trim();
+    remove(id);
+    save();
+    return reply(event.replyToken,'削除');
+  }
+
+  // ===== 緊急ON =====
   if(text === '緊急ON'){
     if(!isAdmin(userId)) return;
     db.emergencyMode = true;
@@ -108,6 +132,7 @@ async function handleEvent(event){
     return reply(event.replyToken,'🚨ON');
   }
 
+  // ===== 緊急OFF =====
   if(text === '緊急OFF'){
     if(!isAdmin(userId)) return;
     db.emergencyMode = false;
@@ -120,42 +145,15 @@ async function handleEvent(event){
     notifyAdmins(`🚨通報\nID:${userId}`);
     return reply(event.replyToken,'通報しました');
   }
-
-  // ===== ID追加方式 =====
-  if(text.startsWith('追加 ')){
-    if(!isAdmin(userId)) return;
-
-    const id = text.replace('追加 ','').trim();
-    db.SUB_ADMIN.push(id);
-    save();
-
-    return reply(event.replyToken,'副管理追加');
-  }
-
-  if(text.startsWith('削除 ')){
-    if(!isAdmin(userId)) return;
-
-    const id = text.replace('削除 ','').trim();
-    remove(id);
-    save();
-
-    return reply(event.replyToken,'削除');
-  }
-
-  if(text === '自分ID'){
-    return reply(event.replyToken,userId);
-  }
 }
 
-// ===== 違反 =====
+// ===== 違反処理 =====
 function punish(id, token, reason){
-
   db.violationCount[id] = (db.violationCount[id]||0)+1;
 
   if(db.violationCount[id] >= 3){
     db.bannedUsers[id] = true;
     save();
-
     return reply(token,'🚫制限');
   }
 
@@ -163,28 +161,36 @@ function punish(id, token, reason){
   return reply(token,'⚠️警告');
 }
 
-// ===== メニュー（擬似リッチ）=====
+// ===== 管理者一覧 =====
+function adminList(token){
+  let txt = "👑本管理\n";
+  db.MAIN_ADMIN.forEach(id=> txt += id+"\n");
+
+  txt += "\n🔧副管理\n";
+  db.SUB_ADMIN.forEach(id=> txt += id+"\n");
+
+  return reply(token, txt);
+}
+
+// ===== リッチ風メニュー =====
 function showMenu(token){
   return client.replyMessage(token,{
     type:"flex",
     altText:"メニュー",
     contents:{
       type:"bubble",
-      hero:{
-        type:"image",
-        url:"https://via.placeholder.com/800x300.png?text=MENU",
-        size:"full",
-        aspectRatio:"20:13"
+      styles:{
+        body:{ backgroundColor:"#f7f7f7" }
       },
       body:{
         type:"box",
         layout:"vertical",
-        spacing:"md",
+        spacing:"sm",
         contents:[
-          row("👑 管理追加","⚠️ 通報"),
-          row("📋 管理者一覧","❌ 管理削除"),
-          row("🔓 BAN解除","🚨 緊急ON"),
-          row("🟢 緊急OFF","🆔 自分ID")
+          gridRow("👑 管理追加","⚠️ 通報"),
+          gridRow("📋 管理者一覧","❌ 管理削除"),
+          gridRow("🔓 BAN解除","🚨 緊急ON"),
+          gridRow("🟢 緊急OFF","🆔 自分ID")
         ]
       }
     }
@@ -192,19 +198,21 @@ function showMenu(token){
 }
 
 // ===== UI =====
-function row(a,b){
+function gridRow(a,b){
   return {
     type:"box",
     layout:"horizontal",
     spacing:"sm",
-    contents:[btn(a),btn(b)]
+    contents:[gridBtn(a),gridBtn(b)]
   };
 }
 
-function btn(text){
+function gridBtn(text){
   return {
     type:"button",
     style:"primary",
+    height:"sm",
+    color:"#06C755",
     action:{
       type:"message",
       label:text,
