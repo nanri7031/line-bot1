@@ -21,12 +21,10 @@ let db = {
   violationCount: {}
 };
 
-// 読み込み
 if (fs.existsSync(DATA_FILE)) {
   db = JSON.parse(fs.readFileSync(DATA_FILE));
 }
 
-// 保存
 function saveDB() {
   fs.writeFileSync(DATA_FILE, JSON.stringify(db, null, 2));
 }
@@ -35,7 +33,7 @@ function saveDB() {
 let pendingAction = {};
 let pendingRole = {};
 
-// ===== NG =====
+// ===== NGワード =====
 const NG_WORDS = ['死ね','バカ','消えろ','アホ'];
 
 // ===== webhook =====
@@ -45,6 +43,7 @@ app.post('/webhook', line.middleware(config), (req, res) => {
     .catch(err => console.error(err));
 });
 
+// ===== メイン処理 =====
 async function handleEvent(event) {
 
   const userId = event.source.userId;
@@ -54,50 +53,49 @@ async function handleEvent(event) {
   }
 
   if (event.type !== 'message') return null;
-
   if (event.message.type !== 'text') return null;
 
   const text = event.message.text;
 
-  // ===== NG =====
+  // NGワード
   if (NG_WORDS.some(w => text.includes(w))) {
     return violation(event, userId);
   }
 
-  // ===== メニュー =====
+  // メニュー
   if (text === 'メニュー') return showMenu(event.replyToken);
 
-  // ===== 管理者一覧 =====
+  // 管理者一覧
   if (text === '管理者一覧') {
     return showAdminList(event.replyToken);
   }
 
-  // ===== 管理追加 =====
+  // 管理追加
   if (text === '管理追加') {
     if (!isAdmin(userId)) return;
     pendingAction[userId] = 'add';
     return showRoleMenu(event.replyToken);
   }
 
-  // ===== 管理削除 =====
+  // 管理削除
   if (text === '管理削除') {
     if (!isAdmin(userId)) return;
     pendingAction[userId] = 'remove';
-    return reply(event.replyToken, '削除したい人をメンションしてください');
+    return reply(event.replyToken, '削除する人を@メンションしてください');
   }
 
-  // ===== BAN解除 =====
+  // BAN解除
   if (text === 'BAN解除') {
     if (!isAdmin(userId)) return;
     pendingAction[userId] = 'unban';
-    return reply(event.replyToken, '解除する人をメンションしてください');
+    return reply(event.replyToken, '解除する人を@メンションしてください');
   }
 
-  // ===== 役職選択 =====
+  // 役職選択
   if (['本管理','副管理','サポート'].includes(text)) {
     if (pendingAction[userId] !== 'add') return;
     pendingRole[userId] = text;
-    return reply(event.replyToken, '追加する人をメンションしてください');
+    return reply(event.replyToken, '追加する人を@メンションしてください');
   }
 
   // ===== メンション取得 =====
@@ -112,7 +110,7 @@ async function handleEvent(event) {
     const action = pendingAction[userId];
     const role = pendingRole[userId];
 
-    // ===== 追加 =====
+    // 追加
     if (action === 'add') {
       if (role === '本管理') db.MAIN_ADMIN.push(targetId);
       if (role === '副管理') db.SUB_ADMIN.push(targetId);
@@ -125,7 +123,7 @@ async function handleEvent(event) {
       return reply(event.replyToken, '✅追加完了');
     }
 
-    // ===== 削除 =====
+    // 削除
     if (action === 'remove') {
       removeUser(targetId);
       saveDB();
@@ -133,7 +131,7 @@ async function handleEvent(event) {
       return reply(event.replyToken, '❌削除完了');
     }
 
-    // ===== BAN解除 =====
+    // BAN解除
     if (action === 'unban') {
       delete db.bannedUsers[targetId];
       db.violationCount[targetId] = 0;
@@ -190,40 +188,71 @@ async function showAdminList(token) {
   return reply(token, text);
 }
 
-// ===== UI =====
+// ===== 画像風メニュー =====
 function showMenu(token) {
   return client.replyMessage(token, {
     type: "flex",
-    altText: "メニュー",
+    altText: "管理メニュー",
     contents: {
       type: "bubble",
       body: {
         type: "box",
         layout: "vertical",
+        spacing: "md",
         contents: [
-          row("管理追加","通報","管理者一覧"),
-          row("管理削除","BAN解除","ルール")
+
+          {
+            type: "box",
+            layout: "horizontal",
+            spacing: "sm",
+            contents: [
+              panel("👑","管理追加","#4A90E2"),
+              panel("⚠️","通報","#FF4D4F"),
+              panel("📋","管理一覧","#36CFC9")
+            ]
+          },
+
+          {
+            type: "box",
+            layout: "horizontal",
+            spacing: "sm",
+            contents: [
+              panel("❌","管理削除","#722ED1"),
+              panel("🔓","BAN解除","#FA8C16"),
+              panel("📜","ルール","#2F54EB")
+            ]
+          }
+
         ]
       }
     }
   });
 }
 
-function row(a,b,c){
+// ===== パネルUI =====
+function panel(icon, text, color){
   return {
-    type:"box",
-    layout:"horizontal",
-    contents:[btn(a),btn(b),btn(c)]
+    type: "box",
+    layout: "vertical",
+    backgroundColor: color,
+    cornerRadius: "md",
+    paddingAll: "10px",
+    alignItems: "center",
+    justifyContent: "center",
+    height: "80px",
+    contents: [
+      { type: "text", text: icon, size: "lg" },
+      { type: "text", text: text, size: "xs", color: "#FFFFFF", margin: "sm" }
+    ],
+    action: {
+      type: "message",
+      label: text,
+      text: text === "管理一覧" ? "管理者一覧" : text
+    }
   };
 }
 
-function btn(text){
-  return {
-    type:"button",
-    action:{type:"message",label:text,text:text}
-  };
-}
-
+// ===== 役職メニュー =====
 function showRoleMenu(token){
   return client.replyMessage(token,{
     type:"flex",
@@ -241,6 +270,13 @@ function showRoleMenu(token){
       }
     }
   });
+}
+
+function btn(text){
+  return {
+    type:"button",
+    action:{type:"message",label:text,text:text}
+  };
 }
 
 // ===== 共通 =====
