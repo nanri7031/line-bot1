@@ -30,6 +30,10 @@ function save() {
   fs.writeFileSync(FILE, JSON.stringify(db, null, 2));
 }
 
+// ===== 状態 =====
+let pending = {};
+let menuState = {}; // ← メニュー開閉
+
 // ===== NG =====
 const NG = ['死ね','バカ','消えろ','アホ'];
 
@@ -40,24 +44,37 @@ app.post('/webhook', line.middleware(config),(req,res)=>{
     .catch(console.error);
 });
 
-// ===== メイン処理 =====
+// ===== メイン =====
 async function handleEvent(event){
 
   if(event.type !== 'message') return;
-  if(event.message.type !== 'text') return;
 
   const userId = event.source.userId;
+
+  // ===== 新規参加 =====
+  if(event.type === 'memberJoined'){
+    return reply(event.replyToken,
+`当グルに参加ありがとうございます😊
+まずノートのルールを読んでください
+読んだらイイねお願いします！`);
+  }
+
+  if(event.message.type !== 'text') return;
+
   const text = event.message.text.trim();
 
   console.log("入力:", text);
 
-  // ===== メニュー（最優先）=====
-  if (
-    text === 'メニュー' ||
-    text.includes('メニュー') ||
-    text === 'm'
-  ) {
-    return safeMenu(event.replyToken);
+  // ===== メニュー表示 =====
+  if(text.includes('メニュー') || text === 'm'){
+    menuState[userId] = true;
+    return menu(event.replyToken);
+  }
+
+  // ===== メニュー閉じる =====
+  if(text === '閉じる'){
+    menuState[userId] = false;
+    return reply(event.replyToken,'メニューを閉じました');
   }
 
   // ===== 緊急モード =====
@@ -70,17 +87,23 @@ async function handleEvent(event){
     return reply(event.replyToken,'🚫制限中');
   }
 
-  // ===== 管理者一覧 =====
-  if(text.includes('管理者一覧')){
-    return showAdminList(event.replyToken);
-  }
-
-  // ===== NGワード =====
+  // ===== NG =====
   if(NG.some(w => text.includes(w))){
     return violation(userId, event.replyToken);
   }
 
-  // ===== 管理操作 =====
+  // ===== 管理者一覧 =====
+  if(text.includes('管理者一覧')){
+    return adminList(event.replyToken);
+  }
+
+  // ===== 通報 =====
+  if(text === '通報'){
+    notifyAdmins(`🚨通報\nID:${userId}`);
+    return reply(event.replyToken,'通報しました');
+  }
+
+  // ===== 緊急 =====
   if(text === '緊急ON'){
     if(!isAdmin(userId)) return;
     db.emergencyMode = true;
@@ -94,11 +117,61 @@ async function handleEvent(event){
     save();
     return reply(event.replyToken,'🟢OFF');
   }
+
+  // ===== 管理操作 =====
+  if(text === '管理追加'){
+    if(!isAdmin(userId)) return;
+    pending[userId] = 'add';
+    return reply(event.replyToken,'@対象をメンション');
+  }
+
+  if(text === '管理削除'){
+    if(!isAdmin(userId)) return;
+    pending[userId] = 'remove';
+    return reply(event.replyToken,'@対象をメンション');
+  }
+
+  if(text === 'BAN解除'){
+    if(!isAdmin(userId)) return;
+    pending[userId] = 'unban';
+    return reply(event.replyToken,'@対象をメンション');
+  }
+
+  // ===== メンション =====
+  let targetId = null;
+  if(event.message.mentions){
+    targetId = event.message.mentions.mentionees[0].userId;
+  }
+
+  if(targetId && pending[userId]){
+
+    if(pending[userId] === 'add'){
+      db.SUB_ADMIN.push(targetId);
+      save();
+      pending[userId] = null;
+      return reply(event.replyToken,'副管理追加');
+    }
+
+    if(pending[userId] === 'remove'){
+      remove(targetId);
+      save();
+      pending[userId] = null;
+      return reply(event.replyToken,'削除');
+    }
+
+    if(pending[userId] === 'unban'){
+      delete db.bannedUsers[targetId];
+      db.violationCount[targetId] = 0;
+      save();
+      pending[userId] = null;
+      return reply(event.replyToken,'解除');
+    }
+  }
 }
 
 // ===== 違反 =====
 function violation(id, token){
-  db.violationCount[id] = (db.violationCount[id] || 0) + 1;
+  db.violationCount[id] = (db.violationCount[id]||0)+1;
 
   if(db.violationCount[id] >= 3){
     db.bannedUsers[id] = true;
@@ -111,7 +184,7 @@ function violation(id, token){
 }
 
 // ===== 管理者一覧 =====
-async function showAdminList(token){
+async function adminList(token){
 
   async function name(id){
     try{
@@ -123,28 +196,19 @@ async function showAdminList(token){
   }
 
   let txt = "👑本管理\n";
-  for(let i of db.MAIN_ADMIN) txt += await name(i) + "\n";
+  for(let i of db.MAIN_ADMIN) txt += await name(i)+"\n";
 
   txt += "\n🔧副管理\n";
-  for(let i of db.SUB_ADMIN) txt += await name(i) + "\n";
+  for(let i of db.SUB_ADMIN) txt += await name(i)+"\n";
 
   txt += "\n🛠サポート\n";
-  for(let i of db.SUPPORT) txt += await name(i) + "\n";
+  for(let i of db.SUPPORT) txt += await name(i)+"\n";
 
   return reply(token, txt);
 }
 
-// ===== メニュー（安全＋2列UI）=====
-function safeMenu(token){
-  try {
-    return showMenu(token);
-  } catch(e){
-    console.log(e);
-    return reply(token,'メニュー表示エラー');
-  }
-}
-
-function showMenu(token){
+// ===== メニュー =====
+function menu(token){
   return client.replyMessage(token,{
     type:"flex",
     altText:"メニュー",
@@ -158,7 +222,8 @@ function showMenu(token){
           row("👑 管理追加","⚠️ 通報"),
           row("📋 管理一覧","❌ 管理削除"),
           row("🔓 BAN解除","🚨 緊急ON"),
-          row("🟢 緊急OFF","📜 ルール")
+          row("🟢 緊急OFF","📜 ルール"),
+          single("❌ 閉じる")
         ]
       }
     }
@@ -170,11 +235,19 @@ function row(a,b){
   return {
     type:"box",
     layout:"horizontal",
-    spacing:"sm",
-    contents:[
-      btn(a),
-      btn(b)
-    ]
+    contents:[btn(a),btn(b)]
+  };
+}
+
+function single(text){
+  return {
+    type:"button",
+    style:"secondary",
+    action:{
+      type:"message",
+      label:text,
+      text:text.replace(/[❌]/g,'').trim()
+    }
   };
 }
 
@@ -182,11 +255,10 @@ function btn(text){
   return {
     type:"button",
     style:"primary",
-    height:"sm",
     action:{
       type:"message",
       label:text,
-      text: text.replace(/[👑⚠️📋❌🔓🚨🟢📜]/g,'').trim()
+      text:text.replace(/[👑⚠️📋❌🔓🚨🟢📜]/g,'').trim()
     }
   };
 }
@@ -198,6 +270,18 @@ function reply(token,text){
 
 function isAdmin(id){
   return db.MAIN_ADMIN.includes(id) || db.SUB_ADMIN.includes(id);
+}
+
+function remove(id){
+  ['MAIN_ADMIN','SUB_ADMIN','SUPPORT'].forEach(k=>{
+    db[k] = db[k].filter(x=>x!==id);
+  });
+}
+
+function notifyAdmins(msg){
+  db.MAIN_ADMIN.forEach(id=>{
+    client.pushMessage(id,{type:'text',text:msg});
+  });
 }
 
 // ===== 起動 =====
