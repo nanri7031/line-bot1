@@ -15,7 +15,7 @@ const SUB_ADMIN = [];
 const SUPPORT = [];
 
 // ===== 状態 =====
-let pendingAction = {}; // add/remove/ban解除
+let pendingAction = {};
 let pendingRole = {};
 let emergencyMode = false;
 
@@ -38,23 +38,24 @@ app.post('/webhook', line.middleware(config), (req, res) => {
     .catch(err => console.error(err));
 });
 
+// ===== メイン処理 =====
 async function handleEvent(event) {
 
   const userId = event.source.userId;
 
-  // ===== BAN中 =====
+  // BAN中
   if (bannedUsers[userId]) {
     return reply(event.replyToken, '🚫発言制限中');
   }
 
-  // ===== 参加 =====
+  // 参加時
   if (event.type === 'memberJoined') {
     return showMenu(event.replyToken);
   }
 
   if (event.type !== 'message') return null;
 
-  // ===== スタンプ =====
+  // スタンプ
   if (event.message.type === 'sticker') {
     const now = Date.now();
     stampLog[userId] = (stampLog[userId] || []).filter(t => now - t < 5000);
@@ -69,49 +70,54 @@ async function handleEvent(event) {
 
   const text = event.message.text;
 
-  // ===== NG =====
+  // NG
   if (NG_WORDS.some(w => text.includes(w))) {
     return violation(event, userId, 'NGワード');
   }
 
-  // ===== メニュー =====
+  // ===== コマンド =====
   if (text === 'メニュー') return showMenu(event.replyToken);
 
-  // ===== 管理追加 =====
+  if (text === '管理者一覧') {
+    return showAdminList(event.replyToken);
+  }
+
+  // 管理追加
   if (text === '管理追加') {
+    if (!isAdmin(userId)) return;
     pendingAction[userId] = 'add';
     return showRoleMenu(event.replyToken);
   }
 
-  // ===== 管理削除 =====
+  // 管理削除
   if (text === '管理削除') {
     if (!isAdmin(userId)) return;
     pendingAction[userId] = 'remove';
-    return reply(event.replyToken, '削除したい管理者に返信してください');
+    return reply(event.replyToken, '削除したいユーザーに返信してください');
   }
 
-  // ===== BAN解除 =====
+  // BAN解除
   if (text === 'BAN解除') {
     if (!isAdmin(userId)) return;
     pendingAction[userId] = 'unban';
     return reply(event.replyToken, '解除したいユーザーに返信してください');
   }
 
-  // ===== 役職選択 =====
+  // 役職選択
   if (['本管理','副管理','サポート'].includes(text)) {
     if (pendingAction[userId] !== 'add') return;
     pendingRole[userId] = text;
     return reply(event.replyToken, '対象ユーザーに返信してください');
   }
 
-  // ===== 返信処理 =====
+  // 返信処理
   if (event.message.quoteToken) {
 
     const action = pendingAction[userId];
     const role = pendingRole[userId];
-    const targetId = userId; // ※簡易（拡張可）
+    const targetId = userId; // 簡易
 
-    // ===== 追加 =====
+    // 追加
     if (action === 'add' && role) {
       if (role === '本管理') MAIN_ADMIN.push(targetId);
       if (role === '副管理') SUB_ADMIN.push(targetId);
@@ -123,27 +129,23 @@ async function handleEvent(event) {
       return reply(event.replyToken, `✅${role}追加`);
     }
 
-    // ===== 削除 =====
+    // 削除
     if (action === 'remove') {
       removeUser(targetId);
-
       delete pendingAction[userId];
-
-      return reply(event.replyToken, '❌管理者削除しました');
+      return reply(event.replyToken, '❌管理者削除');
     }
 
-    // ===== BAN解除 =====
+    // BAN解除
     if (action === 'unban') {
       delete bannedUsers[targetId];
       violationCount[targetId] = 0;
-
       delete pendingAction[userId];
-
-      return reply(event.replyToken, '✅BAN解除しました');
+      return reply(event.replyToken, '✅BAN解除');
     }
   }
 
-  // ===== 緊急 =====
+  // 緊急
   if (text === '緊急ON') {
     if (!isAdmin(userId)) return;
     emergencyMode = true;
@@ -156,7 +158,7 @@ async function handleEvent(event) {
     return reply(event.replyToken, '緊急OFF');
   }
 
-  // ===== 通報 =====
+  // 通報
   if (text === '通報') {
     notifyAdmins(`🚨通報\nID:${userId}`);
     return reply(event.replyToken, '通報しました');
@@ -165,7 +167,7 @@ async function handleEvent(event) {
   return null;
 }
 
-// ===== 違反 =====
+// ===== 違反処理 =====
 function violation(event, userId, reason) {
   violationCount[userId] = (violationCount[userId] || 0) + 1;
   const count = violationCount[userId];
@@ -181,6 +183,29 @@ function violation(event, userId, reason) {
   }
 }
 
+// ===== 管理者一覧 =====
+function showAdminList(token) {
+
+  const main = MAIN_ADMIN.length ? MAIN_ADMIN.join('\n') : 'なし';
+  const sub = SUB_ADMIN.length ? SUB_ADMIN.join('\n') : 'なし';
+  const sup = SUPPORT.length ? SUPPORT.join('\n') : 'なし';
+
+  const msg =
+`👑本管理
+${main}
+
+🔧副管理
+${sub}
+
+🛠サポート
+${sup}`;
+
+  return client.replyMessage(token, {
+    type: 'text',
+    text: msg
+  });
+}
+
 // ===== UI =====
 function showMenu(token) {
   return client.replyMessage(token, {
@@ -193,7 +218,7 @@ function showMenu(token) {
         layout: "vertical",
         spacing: "md",
         contents: [
-          row("管理追加","通報","設定"),
+          row("管理追加","通報","管理者一覧"),
           row("管理削除","BAN解除","ルール"),
           row("緊急ON","緊急OFF","メニュー")
         ]
