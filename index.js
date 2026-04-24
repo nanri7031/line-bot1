@@ -47,20 +47,25 @@ app.post('/webhook', line.middleware(config),(req,res)=>{
 // ===== メイン =====
 async function handleEvent(event){
 
-  // ★ message以外は無視
-  if(event.type !== 'message') return;
-  if(event.message.type !== 'text') return;
+  if(event.type!=='message') return;
+  if(event.message.type!=='text') return;
 
   const userId = event.source.userId;
-  const text = event.message.text.trim();
+  const rawText = event.message.text;
+  const text = rawText.trim();
 
-  console.log("受信:", text);
+  console.log("入力:", JSON.stringify(text));
 
   // =========================
-  // ★最優先：メニュー（完全対策）
+  // ★メニュー完全対策（最強版）
   // =========================
-  if (text.includes('メニュー')) {
-    console.log("メニュー起動成功");
+  if (
+    text === 'メニュー' ||
+    text.includes('メニュー') ||
+    text.toLowerCase() === 'menu' ||
+    text === 'm'
+  ) {
+    console.log("メニュー表示成功");
     return showMenu(event.replyToken);
   }
 
