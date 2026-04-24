@@ -23,7 +23,7 @@ function save(){
 
 // ===== 管理者 =====
 let adminData = {
-  owner: ['ここにあなたのID'],
+  owner: ['U1a1aca9e44466f8cb05003d7dc86fee0'],
   admin: []
 };
 
@@ -132,7 +132,7 @@ async function handleEvent(event){
       return showUsers(event,page);
     }
 
-    // 操作
+    // ===== 管理操作 =====
     const [action,id] = data.split(':');
 
     if(!isAdmin(userId)) return;
