@@ -10,7 +10,7 @@ const config = {
 const client = new line.Client(config);
 const app = express();
 
-// ===== データ保存 =====
+// ===== データ =====
 const FILE = './data.json';
 
 let db = {
@@ -26,13 +26,13 @@ if (fs.existsSync(FILE)) {
   db = JSON.parse(fs.readFileSync(FILE));
 }
 
-function save() {
-  fs.writeFileSync(FILE, JSON.stringify(db, null, 2));
+function save(){
+  fs.writeFileSync(FILE, JSON.stringify(db,null,2));
 }
 
 // ===== 状態 =====
 let pending = {};
-let menuState = {}; // ← メニュー開閉
+let menuState = {};
 
 // ===== NG =====
 const NG = ['死ね','バカ','消えろ','アホ'];
@@ -51,14 +51,6 @@ async function handleEvent(event){
 
   const userId = event.source.userId;
 
-  // ===== 新規参加 =====
-  if(event.type === 'memberJoined'){
-    return reply(event.replyToken,
-`当グルに参加ありがとうございます😊
-まずノートのルールを読んでください
-読んだらイイねお願いします！`);
-  }
-
   if(event.message.type !== 'text') return;
 
   const text = event.message.text.trim();
@@ -68,13 +60,42 @@ async function handleEvent(event){
   // ===== メニュー表示 =====
   if(text.includes('メニュー') || text === 'm'){
     menuState[userId] = true;
-    return menu(event.replyToken);
+    return showMenu(event.replyToken);
   }
 
-  // ===== メニュー閉じる =====
+  // ===== メニュー閉じる（UI切替）=====
   if(text === '閉じる'){
     menuState[userId] = false;
-    return reply(event.replyToken,'メニューを閉じました');
+
+    return client.replyMessage(event.replyToken,{
+      type:"flex",
+      altText:"閉じました",
+      contents:{
+        type:"bubble",
+        body:{
+          type:"box",
+          layout:"vertical",
+          spacing:"md",
+          contents:[
+            {
+              type:"text",
+              text:"メニューは閉じています",
+              size:"md",
+              weight:"bold"
+            },
+            {
+              type:"button",
+              style:"primary",
+              action:{
+                type:"message",
+                label:"メニューを開く",
+                text:"メニュー"
+              }
+            }
+          ]
+        }
+      }
+    });
   }
 
   // ===== 緊急モード =====
@@ -208,7 +229,7 @@ async function adminList(token){
 }
 
 // ===== メニュー =====
-function menu(token){
+function showMenu(token){
   return client.replyMessage(token,{
     type:"flex",
     altText:"メニュー",
