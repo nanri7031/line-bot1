@@ -1,342 +1,265 @@
-const express = require('express');
 const line = require('@line/bot-sdk');
-const fs = require('fs');
+const express = require('express');
 
 const config = {
-  channelAccessToken: process.env.ACCESS_TOKEN,
-  channelSecret: process.env.SECRET
+  channelAccessToken: process.env.CHANNEL_ACCESS_TOKEN,
+  channelSecret: process.env.CHANNEL_SECRET
 };
 
-const app = express();
 const client = new line.Client(config);
-
-// ===== DB =====
-let db = { users:{}, blacklist:[] };
-
-if(fs.existsSync('db.json')){
-  db = JSON.parse(fs.readFileSync('db.json'));
-}
-
-function save(){
-  fs.writeFileSync('db.json', JSON.stringify(db,null,2));
-}
+const app = express();
 
 // ===== 管理者 =====
-let adminData = {
-  owner: ['U1a1aca9e44466f8cb05003d7dc86fee0'],
-  admin: []
-};
-
-const isOwner = id => adminData.owner.includes(id);
-const isAdmin = id => isOwner(id) || adminData.admin.includes(id);
+const MAIN_ADMIN = ['U1a1aca9e44466f8cb05003d7dc86fee0'];
+const SUB_ADMIN = [];
+const SUPPORT = [];
 
 // ===== 状態 =====
-let leaveLog = [];
-let emergency = false;
-let timer = null;
+let pendingAction = {}; // add/remove/ban解除
+let pendingRole = {};
+let emergencyMode = false;
 
-// ===== Webhook =====
-app.post('/webhook', line.middleware(config),(req,res)=>{
-  Promise.all(req.body.events.map(handleEvent)).then(()=>res.end());
+// ===== NG =====
+const NG_WORDS = ['死ね','バカ','消えろ','アホ'];
+
+// ===== データ =====
+let stampLog = {};
+let violationCount = {};
+let bannedUsers = {};
+
+// ===== 設定 =====
+const WARN_LIMIT = 2;
+const BAN_LIMIT = 3;
+
+// ===== webhook =====
+app.post('/webhook', line.middleware(config), (req, res) => {
+  Promise.all(req.body.events.map(handleEvent))
+    .then(() => res.json({ success: true }))
+    .catch(err => console.error(err));
 });
 
-// ===== メイン =====
-async function handleEvent(event){
+async function handleEvent(event) {
 
   const userId = event.source.userId;
-  const groupId = event.source.groupId;
-  const now = Date.now();
 
-  // ===== 初期登録 =====
-  if(!db.users[userId]){
-    const p = await client.getProfile(userId);
-    db.users[userId] = {
-      name:p.displayName,
-      warns:0,
-      lastMsg:'',
-      lastTime:0,
-      stamp:0,
-      lastStamp:0
-    };
-    save();
+  // ===== BAN中 =====
+  if (bannedUsers[userId]) {
+    return reply(event.replyToken, '🚫発言制限中');
   }
-
-  const user = db.users[userId];
 
   // ===== 参加 =====
-  if(event.type === 'memberJoined'){
-    const id = event.joined.members[0].userId;
-
-    if(db.blacklist.includes(id)){
-      await client.kickoutFromGroup(groupId,[id]);
-      return;
-    }
-
-    const p = await client.getGroupMemberProfile(groupId,id);
-    return reply(event,`@${p.displayName} ようこそ！`);
+  if (event.type === 'memberJoined') {
+    return showMenu(event.replyToken);
   }
 
-  // ===== 解体検知 =====
-  if(event.type === 'memberLeft'){
-    leaveLog.push(now);
-    leaveLog = leaveLog.filter(t => now - t < 10000);
-
-    if(leaveLog.length >= 5 && !emergency){
-      emergency = true;
-      notifyAdmins('🚨 解体検知！緊急モードON');
-
-      clearTimeout(timer);
-      timer = setTimeout(()=>{
-        emergency = false;
-        notifyAdmins('🟢 自動解除');
-      }, 30*60*1000);
-    }
-    return;
-  }
-
-  // ===== メニュー表示 =====
-  if(event.type === 'message'){
-    return showMenu(event);
-  }
-
-  // ===== ボタン処理 =====
-  if(event.type === 'postback'){
-
-    const data = event.postback.data;
-
-    if(data === 'menu') return showMenu(event);
-    if(data === 'users:0') return showUsers(event,0);
-    if(data === 'admins') return showAdmins(event);
-    if(data === 'addAdmin') return showAddAdmin(event);
-    if(data === 'myid') return reply(event,`あなたのID: ${userId}`);
-
-    // ===== 緊急モード =====
-    if(data === 'emergencyOn'){
-      if(!isAdmin(userId)) return;
-      emergency = true;
-      notifyAdmins('🚨 手動で緊急モードON');
-      return reply(event,'ON');
-    }
-
-    if(data === 'emergencyOff'){
-      if(!isAdmin(userId)) return;
-      emergency = false;
-      leaveLog = [];
-      notifyAdmins('🟢 手動解除');
-      return reply(event,'解除');
-    }
-
-    // ページ
-    if(data.startsWith('users:')){
-      const page = Number(data.split(':')[1]);
-      return showUsers(event,page);
-    }
-
-    // ===== 管理操作 =====
-    const [action,id] = data.split(':');
-
-    if(!isAdmin(userId)) return;
-
-    if(action === 'warn') db.users[id].warns++;
-    if(action === 'ban'){
-      if(!db.blacklist.includes(id)) db.blacklist.push(id);
-    }
-    if(action === 'unban'){
-      db.blacklist = db.blacklist.filter(v => v !== id);
-    }
-    if(action === 'kick'){
-      await client.kickoutFromGroup(groupId,[id]);
-    }
-    if(action === 'addSub'){
-      if(isOwner(userId)) adminData.admin.push(id);
-    }
-    if(action === 'addOwner'){
-      if(isOwner(userId)) adminData.owner.push(id);
-    }
-
-    save();
-    return reply(event,'完了');
-  }
-
-  // ===== 自動キック =====
-  if(event.type === 'message'){
-
-    const text = event.message.text;
-
-    if(text && ['アホ','バカ','死ね'].some(w=>text.includes(w))){
-      if(!isAdmin(userId)){
-        db.blacklist.push(userId);
-        save();
-        return client.kickoutFromGroup(groupId,[userId]);
-      }
-    }
-
-    if(emergency && !isAdmin(userId)){
-      return client.kickoutFromGroup(groupId,[userId]);
-    }
-
-    if(text === user.lastMsg && now - user.lastTime < 3000){
-      user.warns++;
-    }
-
-    user.lastMsg = text;
-    user.lastTime = now;
-
-    if(user.warns >= 3 && !isAdmin(userId)){
-      return client.kickoutFromGroup(groupId,[userId]);
-    }
-  }
+  if (event.type !== 'message') return null;
 
   // ===== スタンプ =====
-  if(event.message?.type === 'sticker'){
-    if(now - user.lastStamp < 3000){
-      user.stamp++;
-    } else {
-      user.stamp = 1;
+  if (event.message.type === 'sticker') {
+    const now = Date.now();
+    stampLog[userId] = (stampLog[userId] || []).filter(t => now - t < 5000);
+    stampLog[userId].push(now);
+
+    if (stampLog[userId].length >= 3) {
+      return violation(event, userId, 'スタンプ連投');
+    }
+  }
+
+  if (event.message.type !== 'text') return null;
+
+  const text = event.message.text;
+
+  // ===== NG =====
+  if (NG_WORDS.some(w => text.includes(w))) {
+    return violation(event, userId, 'NGワード');
+  }
+
+  // ===== メニュー =====
+  if (text === 'メニュー') return showMenu(event.replyToken);
+
+  // ===== 管理追加 =====
+  if (text === '管理追加') {
+    pendingAction[userId] = 'add';
+    return showRoleMenu(event.replyToken);
+  }
+
+  // ===== 管理削除 =====
+  if (text === '管理削除') {
+    if (!isAdmin(userId)) return;
+    pendingAction[userId] = 'remove';
+    return reply(event.replyToken, '削除したい管理者に返信してください');
+  }
+
+  // ===== BAN解除 =====
+  if (text === 'BAN解除') {
+    if (!isAdmin(userId)) return;
+    pendingAction[userId] = 'unban';
+    return reply(event.replyToken, '解除したいユーザーに返信してください');
+  }
+
+  // ===== 役職選択 =====
+  if (['本管理','副管理','サポート'].includes(text)) {
+    if (pendingAction[userId] !== 'add') return;
+    pendingRole[userId] = text;
+    return reply(event.replyToken, '対象ユーザーに返信してください');
+  }
+
+  // ===== 返信処理 =====
+  if (event.message.quoteToken) {
+
+    const action = pendingAction[userId];
+    const role = pendingRole[userId];
+    const targetId = userId; // ※簡易（拡張可）
+
+    // ===== 追加 =====
+    if (action === 'add' && role) {
+      if (role === '本管理') MAIN_ADMIN.push(targetId);
+      if (role === '副管理') SUB_ADMIN.push(targetId);
+      if (role === 'サポート') SUPPORT.push(targetId);
+
+      delete pendingAction[userId];
+      delete pendingRole[userId];
+
+      return reply(event.replyToken, `✅${role}追加`);
     }
 
-    user.lastStamp = now;
+    // ===== 削除 =====
+    if (action === 'remove') {
+      removeUser(targetId);
 
-    if(user.stamp >= 3 && !isAdmin(userId)){
-      return client.kickoutFromGroup(groupId,[userId]);
+      delete pendingAction[userId];
+
+      return reply(event.replyToken, '❌管理者削除しました');
     }
+
+    // ===== BAN解除 =====
+    if (action === 'unban') {
+      delete bannedUsers[targetId];
+      violationCount[targetId] = 0;
+
+      delete pendingAction[userId];
+
+      return reply(event.replyToken, '✅BAN解除しました');
+    }
+  }
+
+  // ===== 緊急 =====
+  if (text === '緊急ON') {
+    if (!isAdmin(userId)) return;
+    emergencyMode = true;
+    return reply(event.replyToken, '🚨緊急ON');
+  }
+
+  if (text === '緊急OFF') {
+    if (!isAdmin(userId)) return;
+    emergencyMode = false;
+    return reply(event.replyToken, '緊急OFF');
+  }
+
+  // ===== 通報 =====
+  if (text === '通報') {
+    notifyAdmins(`🚨通報\nID:${userId}`);
+    return reply(event.replyToken, '通報しました');
+  }
+
+  return null;
+}
+
+// ===== 違反 =====
+function violation(event, userId, reason) {
+  violationCount[userId] = (violationCount[userId] || 0) + 1;
+  const count = violationCount[userId];
+
+  if (count <= WARN_LIMIT) {
+    return reply(event.replyToken, `⚠️${reason}（${count}/${BAN_LIMIT}）`);
+  }
+
+  if (count >= BAN_LIMIT) {
+    bannedUsers[userId] = true;
+    notifyAdmins(`🚨BAN\n理由:${reason}\nID:${userId}`);
+    return reply(event.replyToken, '🚫制限されました');
   }
 }
 
-// ===== メニュー =====
-function showMenu(event){
-  return client.replyMessage(event.replyToken,{
-    type:'flex',
-    altText:'menu',
-    contents:{
-      type:'bubble',
-      body:{
-        type:'box',
-        layout:'vertical',
-        contents:[
-          btn('👥 ユーザー','users:0'),
-          btn('👑 管理者','admins'),
-          btn('🆔 ID','myid'),
-          btn('🚨 緊急ON','emergencyOn'),
-          btn('🟢 緊急解除','emergencyOff')
+// ===== UI =====
+function showMenu(token) {
+  return client.replyMessage(token, {
+    type: "flex",
+    altText: "メニュー",
+    contents: {
+      type: "bubble",
+      body: {
+        type: "box",
+        layout: "vertical",
+        spacing: "md",
+        contents: [
+          row("管理追加","通報","設定"),
+          row("管理削除","BAN解除","ルール"),
+          row("緊急ON","緊急OFF","メニュー")
         ]
       }
     }
   });
 }
 
-// ===== ユーザー一覧 =====
-function showUsers(event,page){
-  const list = Object.entries(db.users);
-  const per = 10;
-  const slice = list.slice(page*per,(page+1)*per);
-
-  const bubbles = slice.map(([id,u])=>({
-    type:'bubble',
-    body:{
-      type:'box',
-      layout:'vertical',
-      contents:[
-        {type:'text',text:u.name},
-        {type:'text',text:`警告:${u.warns}`},
-        {
-          type:'box',
-          layout:'horizontal',
-          contents:[
-            btn('警告',`warn:${id}`),
-            btn('BAN',`ban:${id}`),
-            btn('解除',`unban:${id}`),
-            btn('キック',`kick:${id}`)
-          ]
-        }
-      ]
-    }
-  }));
-
-  bubbles.push({
-    type:'bubble',
-    body:{
-      type:'box',
-      layout:'horizontal',
-      contents:[
-        btn('⬅️',`users:${page-1}`),
-        btn('➡️',`users:${page+1}`)
-      ]
-    }
-  });
-
-  return client.replyMessage(event.replyToken,{
-    type:'flex',
-    altText:'users',
-    contents:{type:'carousel',contents:bubbles}
-  });
+function row(a,b,c){
+  return {
+    type:"box",
+    layout:"horizontal",
+    contents:[
+      btn(a),btn(b),btn(c)
+    ]
+  };
 }
 
-// ===== 管理者 =====
-function showAdmins(event){
-  return client.replyMessage(event.replyToken,{
-    type:'flex',
-    altText:'admins',
+function btn(text){
+  return {
+    type:"button",
+    style:"primary",
+    action:{type:"message",label:text,text:text}
+  };
+}
+
+function showRoleMenu(token){
+  return client.replyMessage(token,{
+    type:"flex",
+    altText:"役職",
     contents:{
-      type:'bubble',
+      type:"bubble",
       body:{
-        type:'box',
-        layout:'vertical',
+        type:"box",
+        layout:"vertical",
         contents:[
-          {type:'text',text:'本管理'},
-          {type:'text',text:adminData.owner.join('\n')},
-          {type:'text',text:'副管理'},
-          {type:'text',text:adminData.admin.join('\n')},
-          btn('➕追加','addAdmin')
+          btn("本管理"),
+          btn("副管理"),
+          btn("サポート")
         ]
       }
     }
   });
 }
 
-// ===== 管理者追加 =====
-function showAddAdmin(event){
-  const bubbles = Object.entries(db.users).map(([id,u])=>({
-    type:'bubble',
-    body:{
-      type:'box',
-      layout:'vertical',
-      contents:[
-        {type:'text',text:u.name},
-        {
-          type:'box',
-          layout:'horizontal',
-          contents:[
-            btn('副管理',`addSub:${id}`),
-            btn('本管理',`addOwner:${id}`)
-          ]
-        }
-      ]
-    }
-  }));
+// ===== 共通 =====
+function reply(token, text){
+  return client.replyMessage(token,{type:'text',text});
+}
 
-  return client.replyMessage(event.replyToken,{
-    type:'flex',
-    altText:'add',
-    contents:{type:'carousel',contents:bubbles}
+function isAdmin(id){
+  return MAIN_ADMIN.includes(id)||SUB_ADMIN.includes(id);
+}
+
+function notifyAdmins(msg){
+  MAIN_ADMIN.forEach(id=>{
+    client.pushMessage(id,{type:'text',text:msg});
   });
 }
 
-// ===== ボタン =====
-function btn(label,data){
-  return {type:'button',action:{type:'postback',label,data}};
-}
-
-// ===== 返信 =====
-function reply(event,text){
-  return client.replyMessage(event.replyToken,{type:'text',text});
-}
-
-// ===== 通知 =====
-function notifyAdmins(text){
-  [...adminData.owner,...adminData.admin].forEach(id=>{
-    client.pushMessage(id,{type:'text',text});
+function removeUser(id){
+  [MAIN_ADMIN,SUB_ADMIN,SUPPORT].forEach(arr=>{
+    const i=arr.indexOf(id);
+    if(i>-1) arr.splice(i,1);
   });
 }
 
-app.listen(3000);
+const PORT = process.env.PORT || 3000;
+app.listen(PORT);
