@@ -47,17 +47,20 @@ app.post('/webhook', line.middleware(config),(req,res)=>{
 // ===== メイン =====
 async function handleEvent(event){
 
-  if(event.type!=='message') return;
-  if(event.message.type!=='text') return;
+  // ★ message以外は無視
+  if(event.type !== 'message') return;
+  if(event.message.type !== 'text') return;
 
   const userId = event.source.userId;
   const text = event.message.text.trim();
 
   console.log("受信:", text);
 
-  // ===== 最優先：メニュー =====
+  // =========================
+  // ★最優先：メニュー（完全対策）
+  // =========================
   if (text.includes('メニュー')) {
-    console.log("メニュー起動");
+    console.log("メニュー起動成功");
     return showMenu(event.replyToken);
   }
 
@@ -195,7 +198,7 @@ async function showAdminList(token){
   return reply(token,txt);
 }
 
-// ===== メニュー（2列安定）=====
+// ===== メニュー =====
 function showMenu(token){
   return client.replyMessage(token,{
     type:"flex",
