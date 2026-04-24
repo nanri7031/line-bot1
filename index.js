@@ -47,7 +47,13 @@ app.post('/webhook', line.middleware(config),(req,res)=>{
 // ===== メイン =====
 async function handleEvent(event){
 
+  if(event.type!=='message') return;
+  if(event.message.type!=='text') return;
+
   const userId = event.source.userId;
+  const text = event.message.text.trim();
+
+  console.log("受信:", text);
 
   // 緊急モード
   if(db.emergencyMode && !isAdmin(userId)){
@@ -59,20 +65,22 @@ async function handleEvent(event){
     return reply(event.replyToken,'🚫制限中');
   }
 
-  if(event.type!=='message') return;
-  if(event.message.type!=='text') return;
+  // ===== メニュー（対策版）=====
+  if(text.includes('メニュー')){
+    return showMenu(event.replyToken);
+  }
 
-  const text = event.message.text;
+  // ===== 管理者一覧 =====
+  if(text.includes('管理者一覧')){
+    return showAdminList(event.replyToken);
+  }
 
-  // NG
+  // ===== NG =====
   if(NG_WORDS.some(w=>text.includes(w))){
     return violation(event,userId,text);
   }
 
-  // コマンド
-  if(text==='メニュー') return showMenu(event.replyToken);
-  if(text==='管理者一覧') return showAdminList(event.replyToken);
-
+  // ===== 管理系 =====
   if(text==='管理追加'){
     if(!isAdmin(userId)) return;
     pendingAction[userId]='add';
@@ -82,13 +90,13 @@ async function handleEvent(event){
   if(text==='管理削除'){
     if(!isAdmin(userId)) return;
     pendingAction[userId]='remove';
-    return reply(event.replyToken,'@対象を指定');
+    return reply(event.replyToken,'@対象指定');
   }
 
   if(text==='BAN解除'){
     if(!isAdmin(userId)) return;
     pendingAction[userId]='unban';
-    return reply(event.replyToken,'@対象を指定');
+    return reply(event.replyToken,'@対象指定');
   }
 
   if(text==='緊急ON'){
@@ -113,7 +121,7 @@ async function handleEvent(event){
     return reply(event.replyToken,'@指定');
   }
 
-  // メンション取得
+  // ===== メンション =====
   let targetId=null;
   if(event.message.mentions){
     targetId=event.message.mentions.mentionees[0].userId;
@@ -186,7 +194,7 @@ async function showAdminList(token){
   return reply(token,txt);
 }
 
-// ===== メニュー（2列安定版）=====
+// ===== メニュー =====
 function showMenu(token){
   return client.replyMessage(token,{
     type:"flex",
