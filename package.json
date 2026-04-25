@@ -1,32 +1,14 @@
 {
-  "size": { "width": 2500, "height": 1686 },
-  "selected": true,
-  "name": "最強管理メニュー",
-  "chatBarText": "メニュー",
-  "areas": [
-    {
-      "bounds": { "x": 0, "y": 0, "width": 833, "height": 843 },
-      "action": { "type": "message", "text": "管理追加" }
-    },
-    {
-      "bounds": { "x": 833, "y": 0, "width": 834, "height": 843 },
-      "action": { "type": "message", "text": "通報" }
-    },
-    {
-      "bounds": { "x": 1667, "y": 0, "width": 833, "height": 843 },
-      "action": { "type": "message", "text": "管理パネル" }
-    },
-    {
-      "bounds": { "x": 0, "y": 843, "width": 833, "height": 843 },
-      "action": { "type": "message", "text": "緊急ON" }
-    },
-    {
-      "bounds": { "x": 833, "y": 843, "width": 834, "height": 843 },
-      "action": { "type": "message", "text": "緊急OFF" }
-    },
-    {
-      "bounds": { "x": 1667, "y": 843, "width": 833, "height": 843 },
-      "action": { "type": "message", "text": "ルール" }
-    }
-  ]
+  "name": "line-bot",
+  "version": "1.0.0",
+  "description": "LINE管理BOT",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "@line/bot-sdk": "^7.5.0",
+    "express": "^4.18.2",
+    "dotenv": "^16.0.0"
+  }
 }
