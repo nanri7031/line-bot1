@@ -12,7 +12,7 @@ const config = {
 const client = new line.Client(config);
 
 // ===== 管理データ =====
-let admins = ["U1a1aca9e44466f8cb05003d7dc86fee0"]; // あなた
+let admins = ["U1a1aca9e44466f8cb05003d7dc86fee0"];
 let banList = [];
 let emergency = false;
 
@@ -44,23 +44,34 @@ async function handleEvent(event) {
     });
   }
 
-  // ===== メッセージ以外無視 =====
   if (event.type !== 'message' || event.message.type !== 'text') {
-    return Promise.resolve(null);
+    return;
   }
 
   const userId = event.source.userId;
   const text = event.message.text;
 
-  // ===== ログ =====
   console.log("USER:", userId);
   console.log("TEXT:", text);
-  console.log("IS_ADMIN:", admins.includes(userId));
 
-  // ===== 管理パネル表示しない =====
-  if (text === "管理パネル") return;
+  // ===== メニュー表示（iPad対策） =====
+  if (text === "メニュー") {
+    return client.replyMessage(event.replyToken, {
+      type: "text",
+      text:
+`📋 メニュー
+管理追加
+通報
+設定
+緊急ON
+緊急OFF
+ルール
 
-  // ===== BAN済みチェック =====
+※そのまま文字を送って操作できます`
+    });
+  }
+
+  // ===== BAN済み =====
   if (banList.includes(userId)) {
     await client.replyMessage(event.replyToken, {
       type: "text",
@@ -76,17 +87,17 @@ async function handleEvent(event) {
 
     await client.replyMessage(event.replyToken, {
       type: "text",
-      text: "⚠️ NGワード検出 → BAN"
+      text: "⚠️ NGワード → BAN"
     });
 
     await client.leaveGroup(groupId);
     return;
   }
 
-  // ===== 通報（誰でもOK） =====
+  // ===== 通報 =====
   if (text === "通報") {
 
-    const msg = `🚨通報発生\nユーザーID:${userId}`;
+    const msg = `🚨通報\nユーザーID:${userId}`;
 
     for (let adminId of admins) {
       await client.pushMessage(adminId, {
@@ -105,7 +116,7 @@ async function handleEvent(event) {
   if (text === "ルール") {
     return client.replyMessage(event.replyToken, {
       type: "text",
-      text: "📋ルール\n・荒らし禁止\n・迷惑行為禁止\n・違反はBAN対象"
+      text: "📋ルール\n・荒らし禁止\n・迷惑行為禁止\n・違反はBAN"
     });
   }
 
@@ -113,14 +124,14 @@ async function handleEvent(event) {
   if (text === "設定") {
     return client.replyMessage(event.replyToken, {
       type: "text",
-      text: "⚙️設定機能は準備中"
+      text: "⚙️設定メニュー（準備中）"
     });
   }
 
-  // ===== 管理者チェック =====
+  // ===== 管理者以外ここで終了 =====
   if (!admins.includes(userId)) return;
 
-  // ===== 管理追加（ID指定） =====
+  // ===== 管理追加 =====
   if (text.startsWith("管理追加")) {
 
     const parts = text.split(" ");
@@ -139,11 +150,11 @@ async function handleEvent(event) {
 
     return client.replyMessage(event.replyToken, {
       type: "text",
-      text: "✅ 管理者追加完了"
+      text: "✅ 管理者追加"
     });
   }
 
-  // ===== BAN（ID指定） =====
+  // ===== BAN =====
   if (text.startsWith("BAN")) {
 
     const parts = text.split(" ");
@@ -191,17 +202,7 @@ async function handleEvent(event) {
     });
   }
 
-  // ===== キック（BOT退室） =====
-  if (text === "キック") {
-    await client.replyMessage(event.replyToken, {
-      type: "text",
-      text: "👢 BOT退室"
-    });
-    await client.leaveGroup(groupId);
-    return;
-  }
-
-  return Promise.resolve(null);
+  return;
 }
 
 // ===== 起動 =====
