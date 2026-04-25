@@ -1,10 +1,8 @@
 require('dotenv').config();
 const express = require('express');
 const line = require('@line/bot-sdk');
-const fs = require('fs');
 
 const app = express();
-app.use(express.json());
 
 const config = {
   channelAccessToken: process.env.CHANNEL_ACCESS_TOKEN,
@@ -13,174 +11,159 @@ const config = {
 
 const client = new line.Client(config);
 
-// ===== DB =====
-const DB_FILE = './db.json';
+// ===== 管理データ =====
+let admins = ["U1a1aca9e44466f8cb05003d7dc86fee0"];
+let banList = [];
+let emergency = false;
 
-let db = {
-  admins: ["U1a1aca9e44466f8cb05003d7dc86fee0"],
-  blacklist: [],
-  reports: {},
-  users: {},
-  logs: []
-};
-
-if (fs.existsSync(DB_FILE)) {
-  db = JSON.parse(fs.readFileSync(DB_FILE));
-}
-
-function saveDB() {
-  fs.writeFileSync(DB_FILE, JSON.stringify(db, null, 2));
-}
-
-// ===== NG =====
-const NG_WORDS = ["死ね", "荒らし", "spam", "詐欺"];
+const NG_WORDS = ["死ね", "荒らし", "NGワード"];
 
 // ===== Webhook =====
 app.post('/webhook', line.middleware(config), (req, res) => {
   Promise.all(req.body.events.map(handleEvent))
-    .then(() => res.status(200).end());
+    .then((result) => res.json(result));
 });
 
-// ===== BOT =====
+// ===== メイン処理 =====
 async function handleEvent(event) {
 
-  if (event.type === 'memberJoined') {
-    const groupId = event.source.groupId;
-    for (let m of event.joined.members) {
-      if (db.blacklist.includes(m.userId)) {
-        await kick(groupId, m.userId);
-      }
-    }
-    return;
-  }
-
-  if (event.type !== 'message' || event.message.type !== 'text') return;
-
-  const text = event.message.text;
   const groupId = event.source.groupId;
+
+  // ===== 新規参加者 挨拶 =====
+  if (event.type === 'memberJoined') {
+
+    return client.pushMessage(groupId, {
+      type: "text",
+      text:
+`当グルにご参加頂きありがとうございます😊
+まずは、ノートのルールを確認して下さいね♪
+確認後イイね必ずタップして下さい♪`
+    });
+  }
+
+  // ===== メッセージ以外無視 =====
+  if (event.type !== 'message' || event.message.type !== 'text') {
+    return Promise.resolve(null);
+  }
+
   const userId = event.source.userId;
-  const replyToken = event.replyToken;
-  const mentions = event.message.mention?.mentionees || [];
+  const text = event.message.text;
 
-  // ユーザー記録
-  db.users[userId] = true;
+  // ===== 管理パネル自動表示OFF =====
+  if (text === "管理パネル") {
+    return Promise.resolve(null);
+  }
 
-  // ===== ブラック =====
-  if (db.blacklist.includes(userId)) {
-    await kick(groupId, userId);
+  // ===== BANチェック =====
+  if (banList.includes(userId)) {
+    await client.replyMessage(event.replyToken, {
+      type: "text",
+      text: "🚫 BANされています"
+    });
+    await client.leaveGroup(groupId);
     return;
   }
 
-  // ===== NG =====
+  // ===== NGワード =====
   if (NG_WORDS.some(w => text.includes(w))) {
-    ban(userId, "NG");
-    await kick(groupId, userId);
+    banList.push(userId);
+
+    await client.replyMessage(event.replyToken, {
+      type: "text",
+      text: "⚠️ NGワード → BAN"
+    });
+
+    await client.leaveGroup(groupId);
     return;
   }
 
   // ===== 通報 =====
-  if (text.startsWith('通報')) {
-    const target = mentions[0]?.userId;
-    if (!target) return reply(replyToken, '対象を@指定');
+  if (text === "通報") {
 
-    if (!db.reports[groupId]) db.reports[groupId] = {};
-    if (!db.reports[groupId][target]) db.reports[groupId][target] = [];
+    const msg = `🚨通報\nユーザーID:${userId}`;
 
-    if (db.reports[groupId][target].includes(userId)) {
-      return reply(replyToken, '通報済み');
+    for (let adminId of admins) {
+      await client.pushMessage(adminId, {
+        type: "text",
+        text: msg
+      });
     }
 
-    db.reports[groupId][target].push(userId);
-    saveDB();
+    return client.replyMessage(event.replyToken, {
+      type: "text",
+      text: "✅ 通報送信"
+    });
+  }
 
-    const count = db.reports[groupId][target].length;
+  // ===== 管理者のみ =====
+  if (!admins.includes(userId)) return;
 
-    if (count >= 3) {
-      ban(target, "通報");
-      await kick(groupId, target);
-      return reply(replyToken, 'BAN実行');
+  // ===== 管理追加 =====
+  if (text === "管理追加") {
+    if (!admins.includes(userId)) {
+      admins.push(userId);
     }
 
-    return reply(replyToken, `通報 ${count}/3`);
+    return client.replyMessage(event.replyToken, {
+      type: "text",
+      text: "✅ 管理者登録"
+    });
   }
 
-  // ===== 管理UI =====
-  if (text === '管理パネル') {
-    return client.replyMessage(replyToken, createUserListFlex());
+  // ===== BAN =====
+  if (text === "BAN") {
+    banList.push(userId);
+
+    return client.replyMessage(event.replyToken, {
+      type: "text",
+      text: "🚫 BAN追加"
+    });
   }
 
-  // ===== BANボタン処理 =====
-  if (text.startsWith('BAN:')) {
-    if (!db.admins.includes(userId)) return;
+  // ===== BAN解除 =====
+  if (text === "BAN解除") {
+    banList = [];
 
-    const target = text.replace('BAN:', '');
-    ban(target, "ボタンBAN");
-    await kick(groupId, target);
-    return reply(replyToken, 'BAN完了');
+    return client.replyMessage(event.replyToken, {
+      type: "text",
+      text: "✅ BAN解除"
+    });
   }
-}
 
-// ===== UI生成 =====
-function createUserListFlex() {
-  const users = Object.keys(db.users).slice(-5);
+  // ===== 緊急ON =====
+  if (text === "緊急ON") {
+    emergency = true;
 
-  return {
-    type: "flex",
-    altText: "ユーザー管理",
-    contents: {
-      type: "bubble",
-      body: {
-        type: "box",
-        layout: "vertical",
-        contents: users.map(id => ({
-          type: "button",
-          action: {
-            type: "message",
-            label: id.substring(0, 6),
-            text: "BAN:" + id
-          }
-        }))
-      }
-    }
-  };
-}
-
-// ===== BAN =====
-function ban(userId, reason) {
-  if (!db.blacklist.includes(userId)) {
-    db.blacklist.push(userId);
-    log(`BAN ${userId} (${reason})`);
-    saveDB();
+    return client.replyMessage(event.replyToken, {
+      type: "text",
+      text: "🚨 緊急ON"
+    });
   }
+
+  // ===== 緊急OFF =====
+  if (text === "緊急OFF") {
+    emergency = false;
+
+    return client.replyMessage(event.replyToken, {
+      type: "text",
+      text: "🟢 緊急OFF"
+    });
+  }
+
+  // ===== キック（BOT退室） =====
+  if (text === "キック") {
+    await client.replyMessage(event.replyToken, {
+      type: "text",
+      text: "👢 退室"
+    });
+
+    await client.leaveGroup(groupId);
+    return;
+  }
+
+  return Promise.resolve(null);
 }
 
-// ===== ログ =====
-function log(msg) {
-  db.logs.push(msg);
-  if (db.logs.length > 100) db.logs.shift();
-}
-
-// ===== 管理画面 =====
-app.get('/admin', (req, res) => {
-  if (req.query.key !== process.env.ADMIN_KEY) return res.send("NG");
-
-  res.send(`
-    <h2>管理</h2>
-    <h3>ユーザー</h3>${Object.keys(db.users).join("<br>")}
-    <h3>ブラック</h3>${db.blacklist.join("<br>")}
-    <h3>ログ</h3>${db.logs.join("<br>")}
-  `);
-});
-
-// ===== 共通 =====
-async function kick(groupId, userId) {
-  try {
-    await client.removeMemberFromGroup(groupId, userId);
-  } catch {}
-}
-
-function reply(token, text) {
-  return client.replyMessage(token, { type: 'text', text });
-}
-
-app.listen(3000);
+// ===== 起動 =====
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => console.log("BOT起動中"));
