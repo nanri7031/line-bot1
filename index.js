@@ -12,7 +12,7 @@ const config = {
 const client = new line.Client(config);
 
 // ===== 管理データ =====
-let admins = ["U1a1aca9e44466f8cb05003d7dc86fee0"];
+let admins = ["U1a1aca9e44466f8cb05003d7dc86fee0"]; // ←あなた
 let banList = [];
 let emergency = false;
 
@@ -31,7 +31,6 @@ async function handleEvent(event) {
 
   // ===== 新規参加者 挨拶 =====
   if (event.type === 'memberJoined') {
-
     return client.pushMessage(groupId, {
       type: "text",
       text:
@@ -49,10 +48,13 @@ async function handleEvent(event) {
   const userId = event.source.userId;
   const text = event.message.text;
 
+  // ===== デバッグ =====
+  console.log("USER:", userId);
+  console.log("ADMIN:", admins.includes(userId));
+  console.log("TEXT:", text);
+
   // ===== 管理パネル自動表示OFF =====
-  if (text === "管理パネル") {
-    return Promise.resolve(null);
-  }
+  if (text === "管理パネル") return;
 
   // ===== BANチェック =====
   if (banList.includes(userId)) {
@@ -77,7 +79,7 @@ async function handleEvent(event) {
     return;
   }
 
-  // ===== 通報 =====
+  // ===== 通報（誰でもOK） =====
   if (text === "通報") {
 
     const msg = `🚨通報\nユーザーID:${userId}`;
@@ -95,28 +97,50 @@ async function handleEvent(event) {
     });
   }
 
-  // ===== 管理者のみ =====
+  // ===== 管理者チェック =====
   if (!admins.includes(userId)) return;
 
-  // ===== 管理追加 =====
-  if (text === "管理追加") {
-    if (!admins.includes(userId)) {
-      admins.push(userId);
+  // ===== 管理追加（ID指定） =====
+  if (text.startsWith("管理追加")) {
+
+    const parts = text.split(" ");
+    const targetId = parts[1];
+
+    if (!targetId) {
+      return client.replyMessage(event.replyToken, {
+        type: "text",
+        text: "IDを指定してください\n例：管理追加 Uxxxx"
+      });
+    }
+
+    if (!admins.includes(targetId)) {
+      admins.push(targetId);
     }
 
     return client.replyMessage(event.replyToken, {
       type: "text",
-      text: "✅ 管理者登録"
+      text: "✅ 管理者追加完了"
     });
   }
 
-  // ===== BAN =====
-  if (text === "BAN") {
-    banList.push(userId);
+  // ===== BAN（ID指定） =====
+  if (text.startsWith("BAN")) {
+
+    const parts = text.split(" ");
+    const targetId = parts[1];
+
+    if (!targetId) {
+      return client.replyMessage(event.replyToken, {
+        type: "text",
+        text: "IDを指定してください\n例：BAN Uxxxx"
+      });
+    }
+
+    banList.push(targetId);
 
     return client.replyMessage(event.replyToken, {
       type: "text",
-      text: "🚫 BAN追加"
+      text: "🚫 BAN完了"
     });
   }
 
@@ -154,7 +178,7 @@ async function handleEvent(event) {
   if (text === "キック") {
     await client.replyMessage(event.replyToken, {
       type: "text",
-      text: "👢 退室"
+      text: "👢 BOT退室"
     });
 
     await client.leaveGroup(groupId);
