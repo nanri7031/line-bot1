@@ -16,13 +16,9 @@ const DB_FILE = "./db.json"
 // ===== DB =====
 function initDB() {
   return {
-    admins: ["U1a1aca9e44466f8cb05003d7dc86fee0"],
+    admins: ["ここを自分のユーザーIDに変える"],
     subAdmins: [],
     globalBan: [],
-    scores: {},
-    reports: {},
-    spam: {},
-    recentUsers: {},
     groups: {}
   }
 }
@@ -47,20 +43,14 @@ function isManager(id, db) {
 function getGroup(db, groupId) {
   if (!db.groups[groupId]) {
     db.groups[groupId] = {
-      ngWords: ["死ね", "荒らし"],
-      autoBanScore: -10
+      ngWords: ["死ね", "荒らし"]
     }
   }
   return db.groups[groupId]
 }
 
-// ===== NG判定 =====
-function isToxic(text) {
-  return /死ね|殺す|バカ+|(.)\1{5,}|https?:\/\//.test(text)
-}
-
 // ===== 擬似キック =====
-async function pseudoKick(userId, name, event, db) {
+async function pseudoKick(userId, name, groupId, db) {
   if (isManager(userId, db)) return
 
   if (!db.globalBan.includes(userId)) {
@@ -69,10 +59,10 @@ async function pseudoKick(userId, name, event, db) {
 
   saveDB(db)
 
-  await client.replyMessage(event.replyToken, [
-    { type: "text", text: `🔨 ${name} を強制退出しました` },
-    { type: "text", text: "🚫 再参加は禁止されています" }
-  ])
+  await client.pushMessage(groupId, {
+    type: "text",
+    text: `🔨 ${name} をBANしました`
+  })
 }
 
 // ===== UI =====
@@ -104,47 +94,8 @@ function menuUI() {
           {
             type: "box",
             layout: "horizontal",
-            contents: [btn("BAN解除", "BAN解除パネル"), btn("管理", "管理UI")]
+            contents: [btn("BAN解除", "BAN解除")]
           }
-        ]
-      }
-    }
-  }
-}
-
-function settingUI() {
-  return {
-    type: "flex",
-    altText: "設定",
-    contents: {
-      type: "bubble",
-      body: {
-        type: "box",
-        layout: "vertical",
-        contents: [
-          { type: "text", text: "⚙️ 設定", weight: "bold" },
-          btn("NG一覧", "NG一覧"),
-          btn("管理", "管理UI")
-        ]
-      }
-    }
-  }
-}
-
-function adminUI() {
-  return {
-    type: "flex",
-    altText: "管理",
-    contents: {
-      type: "bubble",
-      body: {
-        type: "box",
-        layout: "vertical",
-        contents: [
-          { type: "text", text: "👑 管理", weight: "bold" },
-          btn("管理追加", "管理追加"),
-          btn("副管理追加", "副管理追加"),
-          btn("管理一覧", "管理一覧")
         ]
       }
     }
@@ -156,13 +107,13 @@ app.post("/webhook", line.middleware(config), async (req, res) => {
   try {
     for (const event of req.body.events) {
 
-      const db = loadDB()
-
       if (event.type !== "message" || event.message.type !== "text") continue
+
+      const db = loadDB()
 
       const text = event.message.text
       const userId = event.source.userId
-      const groupId = event.source.groupId || "private"
+      const groupId = event.source.groupId || userId
 
       const group = getGroup(db, groupId)
 
@@ -172,106 +123,55 @@ app.post("/webhook", line.middleware(config), async (req, res) => {
         name = p.displayName
       } catch {}
 
-      // 最近ユーザー
-      if (!db.recentUsers[groupId]) db.recentUsers[groupId] = []
-      db.recentUsers[groupId].push({ id: userId, name })
-      db.recentUsers[groupId] = db.recentUsers[groupId].slice(-5)
-
-      // BAN
+      // BANチェック
       if (db.globalBan.includes(userId)) {
-        await client.replyMessage(event.replyToken, {
+        await client.pushMessage(groupId, {
           type: "text",
-          text: "🚫 利用禁止"
+          text: "🚫 BANされています"
         })
         continue
       }
 
-      // NG
-      if (isToxic(text) || group.ngWords.some(w => text.includes(w))) {
-        await pseudoKick(userId, name, event, db)
+      // NG判定
+      if (group.ngWords.some(w => text.includes(w))) {
+        await pseudoKick(userId, name, groupId, db)
         continue
       }
 
-      // ===== メニュー =====
+      // メニュー
       if (text === "メニュー") {
-        await client.replyMessage(event.replyToken, menuUI())
+        await client.pushMessage(groupId, menuUI())
         continue
       }
 
-      // ===== 設定 =====
+      // 設定
       if (text === "設定") {
-        await client.replyMessage(event.replyToken, settingUI())
+        await client.pushMessage(groupId, {
+          type: "text",
+          text: "設定：NG一覧 / 管理"
+        })
         continue
       }
 
-      // ===== NG一覧 =====
+      // NG一覧
       if (text === "NG一覧") {
-        await client.replyMessage(event.replyToken, {
+        await client.pushMessage(groupId, {
           type: "text",
           text: group.ngWords.join("\n")
         })
         continue
       }
 
-      // ===== 管理 =====
-      if (text === "管理UI") {
-        if (!isManager(userId, db)) return
-        await client.replyMessage(event.replyToken, adminUI())
-        continue
-      }
-
-      if (text === "管理一覧") {
-        await client.replyMessage(event.replyToken, {
-          type: "text",
-          text: db.admins.join("\n")
-        })
-        continue
-      }
-
-      // ===== BAN解除 =====
-      if (text === "BAN解除パネル") {
-        if (!isManager(userId, db)) return
-
-        await client.replyMessage(event.replyToken, {
-          type: "text",
-          text: db.globalBan.join("\n") || "なし"
-        })
-        continue
-      }
-
-      // ===== 通報 =====
+      // 通報
       if (text === "通報") {
-        await client.replyMessage(event.replyToken, {
+        await client.pushMessage(groupId, {
           type: "text",
-          text: "通報したいIDを入力: 通報ID Uxxxx"
+          text: "通報は管理者へ"
         })
         continue
       }
 
-      if (text.startsWith("通報ID ")) {
-        const target = text.split(" ")[1]
-
-        db.reports[target] = (db.reports[target] || 0) + 1
-
-        if (db.reports[target] >= 3) {
-          db.globalBan.push(target)
-          saveDB(db)
-
-          await client.replyMessage(event.replyToken, {
-            type: "text",
-            text: "🚫 通報BAN"
-          })
-          continue
-        }
-
-        await client.replyMessage(event.replyToken, {
-          type: "text",
-          text: "通報完了"
-        })
-        continue
-      }
-
-      await client.replyMessage(event.replyToken, {
+      await client.pushMessage(groupId, {
         type: "text",
         text: "OK"
       })
