@@ -1,15 +1,12 @@
-// ===== 必要パッケージ =====
-// npm install express @line/bot-sdk
-
-const express = requireの("express");
-const line = require("@line/bot-sdk");
+import express from "express";
+import line from "@line/bot-sdk";
 
 const app = express();
 
-// ===== LINE設定 =====
+// ===== LINE設定（←ここ戻す）=====
 const config = {
-  channelAccessToken: "ZuBpejw3lChWMM1n59PJq7dQ6fQCWRqexOVRx74UcjA3twD1yt+dvfXDRxUBhbI0l3xX7BQ7c+xSirNmRAWnmk/w1R7IMhlKToJnQtiORz2opDAuPx3ndckC3saC509mbva/C7FkLQy99Ozp/vz8igdB04t89/1O/w1cDnyilFU=",
-  channelSecret: "27b76eec6bcfefb6183dd2a79fb42896"
+  channelAccessToken: process.env.CHANNEL_ACCESS_TOKEN,
+  channelSecret: process.env.CHANNEL_SECRET
 };
 
 const client = new line.Client(config);
@@ -24,7 +21,6 @@ app.post("/webhook", async (req, res) => {
 
     await Promise.all(events.map(async (event) => {
 
-      // テキストメッセージ
       if (event.type === "message" && event.message.type === "text") {
         return client.replyMessage(event.replyToken, {
           type: "text",
@@ -32,7 +28,6 @@ app.post("/webhook", async (req, res) => {
         });
       }
 
-      // スタンプ・画像など全部に最低限反応させる
       if (event.type === "message") {
         return client.replyMessage(event.replyToken, {
           type: "text",
@@ -40,7 +35,6 @@ app.post("/webhook", async (req, res) => {
         });
       }
 
-      // 参加時（グループなど）
       if (event.type === "join") {
         return client.replyMessage(event.replyToken, {
           type: "text",
@@ -48,7 +42,6 @@ app.post("/webhook", async (req, res) => {
         });
       }
 
-      // フォロー時
       if (event.type === "follow") {
         return client.replyMessage(event.replyToken, {
           type: "text",
