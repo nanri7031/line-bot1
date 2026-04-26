@@ -1,11 +1,12 @@
 {
   "admins": ["U1a1aca9e44466f8cb05003d7dc86fee0"],
   "subAdmins": [],
+  "banList": [],
   "reports": {},
-  "blacklist": [],
+  "userCounts": {},
+  "emergency": false,
   "settings": {
     "autoBan": 3,
-    "ngWords": ["死ね", "荒らし"],
-    "emergency": false
+    "ngWords": ["死ね", "荒らし"]
   }
 }
