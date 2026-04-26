@@ -50,35 +50,25 @@ function isManager(uid, g) {
   return g.admins.includes(uid) || g.subAdmins.includes(uid)
 }
 
-// 状態
+// ===== 状態 =====
 let ngMode = {}
 let welcomeMode = {}
 let reportMode = {}
 
+// ===== webhook =====
 app.post("/webhook", line.middleware(config), async (req, res) => {
   try {
     for (const event of req.body.events) {
 
-      const db = loadDB()
-
-      // ===== 新規参加 =====
-      if (event.type === "memberJoined") {
-        const gid = event.source.groupId
-        const g = getGroup(db, gid)
-
-        await client.pushMessage(gid, {
-          type: "text",
-          text: g.welcome
-        })
-        continue
-      }
-
       if (event.type !== "message" || event.message.type !== "text") continue
 
-      const text = event.message.text.trim()
+      const text = event.message.text
+      const msg = text.trim() // ★修正済み
+
       const uid = event.source.userId
       const gid = event.source.groupId || uid
 
+      const db = loadDB()
       const g = getGroup(db, gid)
 
       let name = "ユーザー"
@@ -97,8 +87,63 @@ app.post("/webhook", line.middleware(config), async (req, res) => {
         continue
       }
 
+      // ===== メニュー =====
+      if (msg.includes("メニュー")) {
+        await client.replyMessage(event.replyToken, {
+          type: "flex",
+          altText: "管理メニュー",
+          contents: {
+            type: "bubble",
+            header: {
+              type: "box",
+              layout: "vertical",
+              contents: [
+                { type: "text", text: "🛠 管理メニュー", color: "#fff", align: "center" }
+              ],
+              backgroundColor: "#1565C0"
+            },
+            body: {
+              type: "box",
+              layout: "vertical",
+              spacing: "md",
+              contents: [
+
+                { type: "box", layout: "horizontal", contents: [
+                  { type: "button", action: { type: "message", label: "管理登録", text: "管理登録" } },
+                  { type: "button", action: { type: "message", label: "BANモード", text: "BANモード" } }
+                ]},
+
+                { type: "box", layout: "horizontal", contents: [
+                  { type: "button", action: { type: "message", label: "NG追加", text: "NG追加" } },
+                  { type: "button", action: { type: "message", label: "通報", text: "通報" } }
+                ]},
+
+                { type: "box", layout: "horizontal", contents: [
+                  { type: "button", action: { type: "message", label: "管理一覧", text: "管理一覧" } },
+                  { type: "button", action: { type: "message", label: "挨拶設定", text: "挨拶設定" } }
+                ]},
+
+                { type: "box", layout: "horizontal", contents: [
+                  { type: "button", action: { type: "message", label: "挨拶確認", text: "挨拶確認" } },
+                  { type: "button", action: { type: "message", label: "ログ", text: "ログ" } }
+                ]},
+
+                {
+                  type: "button",
+                  style: "primary",
+                  color: "#D32F2F",
+                  action: { type: "message", label: "擬似キック", text: "擬似キック" }
+                }
+
+              ]
+            }
+          }
+        })
+        continue
+      }
+
       // ===== メンションBAN =====
-      if (text.includes("BAN") && event.message.mention?.mentionees && isMgr) {
+      if (msg.includes("BAN") && event.message.mention?.mentionees && isMgr) {
         const target = event.message.mention.mentionees[0].userId
 
         if (isManager(target, g)) {
@@ -113,17 +158,8 @@ app.post("/webhook", line.middleware(config), async (req, res) => {
         continue
       }
 
-      // ===== メンションキック =====
-      if (text.includes("キック") && event.message.mention?.mentionees && isMgr) {
-        await client.replyMessage(event.replyToken, {
-          type: "text",
-          text: "⚠️ 対象ユーザーは退出してください"
-        })
-        continue
-      }
-
       // ===== 通報 =====
-      if (text === "通報" && isMgr) {
+      if (msg === "通報" && isMgr) {
         reportMode[gid] = true
         await client.replyMessage(event.replyToken, { type: "text", text: "次を通報" })
         continue
@@ -153,14 +189,14 @@ app.post("/webhook", line.middleware(config), async (req, res) => {
       }
 
       // ===== NG追加 =====
-      if (text === "NG追加" && isMgr) {
+      if (msg === "NG追加" && isMgr) {
         ngMode[gid] = true
         await client.replyMessage(event.replyToken, { type: "text", text: "NG送信" })
         continue
       }
 
       if (ngMode[gid]) {
-        g.ngWords.push(text)
+        g.ngWords.push(msg)
         ngMode[gid] = false
         saveDB(db)
 
@@ -169,31 +205,29 @@ app.post("/webhook", line.middleware(config), async (req, res) => {
       }
 
       // ===== NG検知 =====
-      if (!isMgr && g.ngWords.some(w => text.includes(w))) {
+      if (!isMgr && g.ngWords.some(w => msg.includes(w))) {
         g.ban.push(uid)
         saveDB(db)
-
         await client.replyMessage(event.replyToken, { type: "text", text: "NG BAN" })
         continue
       }
 
       // ===== 挨拶 =====
-      if (text === "挨拶設定" && isMgr) {
+      if (msg === "挨拶設定" && isMgr) {
         welcomeMode[gid] = true
         await client.replyMessage(event.replyToken, { type: "text", text: "挨拶送信" })
         continue
       }
 
       if (welcomeMode[gid]) {
-        g.welcome = text
+        g.welcome = msg
         welcomeMode[gid] = false
         saveDB(db)
-
         await client.replyMessage(event.replyToken, { type: "text", text: "更新完了" })
         continue
       }
 
-      if (text === "挨拶確認") {
+      if (msg === "挨拶確認") {
         await client.replyMessage(event.replyToken, {
           type: "text",
           text: g.welcome
@@ -201,56 +235,14 @@ app.post("/webhook", line.middleware(config), async (req, res) => {
         continue
       }
 
-      // ===== メニュー =====
-      if (text === "メニュー") {
-        await client.replyMessage(event.replyToken, {
-          type: "flex",
-          altText: "管理メニュー",
-          contents: {
-            type: "bubble",
-            header: {
-              type: "box",
-              layout: "vertical",
-              contents: [
-                { type: "text", text: "🛠 管理メニュー", color: "#fff", align: "center" }
-              ],
-              backgroundColor: "#1565C0"
-            },
-            body: {
-              type: "box",
-              layout: "vertical",
-              spacing: "md",
-              contents: [
-
-                {
-                  type: "box",
-                  layout: "horizontal",
-                  contents: [
-                    { type: "button", action: { type: "message", label: "NG追加", text: "NG追加" } },
-                    { type: "button", action: { type: "message", label: "通報", text: "通報" } }
-                  ]
-                },
-
-                {
-                  type: "box",
-                  layout: "horizontal",
-                  contents: [
-                    { type: "button", action: { type: "message", label: "挨拶設定", text: "挨拶設定" } },
-                    { type: "button", action: { type: "message", label: "挨拶確認", text: "挨拶確認" } }
-                  ]
-                }
-
-              ]
-            }
-          }
-        })
+      // ===== ログ =====
+      if (msg === "ログ") {
+        const list = g.logs.join("\n") || "なし"
+        await client.replyMessage(event.replyToken, { type: "text", text: list })
         continue
       }
 
-      await client.replyMessage(event.replyToken, {
-        type: "text",
-        text: "OK"
-      })
+      await client.replyMessage(event.replyToken, { type: "text", text: "OK" })
     }
 
     res.sendStatus(200)
