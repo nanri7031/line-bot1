@@ -1,6 +1,10 @@
 import express from "express"
 import line from "@line/bot-sdk"
-import fs from "fs"
+import dotenv from "dotenv"
+import { Low } from "lowdb"
+import { JSONFile } from "lowdb/node"
+
+dotenv.config()
 
 const app = express()
 
@@ -11,202 +15,168 @@ const config = {
 
 const client = new line.Client(config)
 
-// ===== DB =====
-let db = {}
-try {
-  db = JSON.parse(fs.readFileSync("./db.json", "utf-8"))
-} catch { db = {} }
+// DB
+const adapter = new JSONFile("db.json")
+const db = new Low(adapter)
 
-db.admins ||= []
-db.subAdmins ||= []
-db.reports ||= {}
-db.blacklist ||= []
-db.settings ||= {
-  autoBan: 3,
-  ngWords: [],
-  emergency: false
+await db.read()
+
+if (!db.data) {
+  db.data = {
+    admins: ["U1a1aca9e44466f8cb05003d7dc86fee0"],
+    subAdmins: [],
+    banList: [],
+    reports: {},
+    userCounts: {},
+    emergency: false,
+    settings: {
+      autoBan: 3,
+      ngWords: ["死ね", "荒らし"]
+    }
+  }
+  await db.write()
 }
 
-const save = () =>
-  fs.writeFileSync("./db.json", JSON.stringify(db, null, 2))
+// 状態管理
+const userState = {}
 
-// ===== Webhook =====
 app.post("/webhook", line.middleware(config), async (req, res) => {
   await Promise.all(req.body.events.map(handleEvent))
   res.sendStatus(200)
 })
 
-app.get("/", (req, res) => res.send("RUNNING"))
-
-// ===== メイン =====
 async function handleEvent(event) {
-
-  // ===== 参加時ブラックリストキック =====
-  if (event.type === "memberJoined") {
-    for (const m of event.joined.members) {
-      if (db.blacklist.includes(m.userId)) {
-        await client.kickoutFromGroup(event.source.groupId, m.userId)
-      }
-    }
-    return
-  }
-
   if (event.type !== "message" || event.message.type !== "text") return
 
   const text = event.message.text
   const userId = event.source.userId
-  const groupId = event.source.groupId
 
-  const isAdmin = db.admins.includes(userId)
-  const isSub = db.subAdmins.includes(userId)
+  const isAdmin = db.data.admins.includes(userId)
+  const isSub = db.data.subAdmins.includes(userId)
 
-  // ===== 初期管理者 =====
-  if (text === "管理者登録" && db.admins.length === 0) {
-    db.admins.push(userId)
-    save()
-    return reply(event, "👑 管理人登録")
+  // BAN済み
+  if (db.data.banList.includes(userId)) {
+    return reply(event, "あなたはBANされています")
   }
 
-  // ===== 緊急モード =====
-  if (isAdmin && text === "緊急ON") {
-    db.settings.emergency = true
-    save()
-    return reply(event, "🚨 ON")
+  // 緊急モード
+  if (db.data.emergency && !isAdmin) {
+    return reply(event, "現在緊急モード中")
   }
 
-  if (isAdmin && text === "緊急OFF") {
-    db.settings.emergency = false
-    save()
-    return reply(event, "OFF")
+  // NGチェック
+  for (let word of db.data.settings.ngWords) {
+    if (text.includes(word) && !isAdmin && !isSub) {
+      db.data.userCounts[userId] = (db.data.userCounts[userId] || 0) + 1
+
+      if (db.data.userCounts[userId] >= db.data.settings.autoBan) {
+        db.data.banList.push(userId)
+        await db.write()
+        return reply(event, "自動BANしました")
+      }
+
+      await db.write()
+      return reply(event, `警告 (${db.data.userCounts[userId]})`)
+    }
   }
 
-  if (db.settings.emergency && !(isAdmin || isSub)) {
-    await kick(groupId, userId)
-    return
-  }
+  // ===== コマンド =====
 
-  // ===== メニューUI =====
   if (text === "メニュー") {
-    return client.replyMessage(event.replyToken, menuUI(isAdmin, isSub))
+    return sendMenu(event)
   }
 
-  // ===== 副管理 =====
-  if (isAdmin && text.startsWith("副管理追加")) {
-    const t = getMention(event)
-    db.subAdmins.push(t)
-    save()
-    return reply(event, "追加OK")
+  if (text === "設定" && (isAdmin || isSub)) {
+    return reply(event, `【設定】
+自動BAN回数: ${db.data.settings.autoBan}
+NGワード: ${db.data.settings.ngWords.join(",")}`)
   }
 
-  if (isAdmin && text.startsWith("副管理削除")) {
-    const t = getMention(event)
-    db.subAdmins = db.subAdmins.filter(id => id !== t)
-    save()
-    return reply(event, "削除OK")
+  if (text.startsWith("NG追加") && (isAdmin || isSub)) {
+    const words = text.replace("NG追加", "").trim().split(",")
+    db.data.settings.ngWords.push(...words)
+    await db.write()
+    return reply(event, "追加完了")
   }
 
-  // ===== NG =====
-  if ((isAdmin || isSub) && text.startsWith("NG追加 ")) {
-    db.settings.ngWords.push(text.replace("NG追加 ", ""))
-    save()
-    return reply(event, "追加OK")
+  if (text.startsWith("NG削除") && (isAdmin || isSub)) {
+    const word = text.replace("NG削除", "").trim()
+    db.data.settings.ngWords = db.data.settings.ngWords.filter(w => w !== word)
+    await db.write()
+    return reply(event, "削除完了")
   }
 
-  if (isAdmin && text.startsWith("NG削除 ")) {
-    db.settings.ngWords =
-      db.settings.ngWords.filter(w => w !== text.replace("NG削除 ", ""))
-    save()
-    return reply(event, "削除OK")
+  if (text === "緊急オン" && isAdmin) {
+    db.data.emergency = true
+    await db.write()
+    return reply(event, "緊急モードON")
   }
 
-  // ===== BAN =====
-  if ((isAdmin || isSub) && text.startsWith("BAN")) {
-    const t = getMention(event)
-    db.blacklist.push(t)
-    save()
-    await kick(groupId, t)
-    return reply(event, "🚫 BAN")
+  if (text === "緊急オフ" && isAdmin) {
+    db.data.emergency = false
+    await db.write()
+    return reply(event, "緊急モードOFF")
   }
 
-  // ===== 通報 =====
-  if (text.startsWith("通報")) {
-    const t = getMention(event)
-    db.reports[t] = (db.reports[t] || 0) + 1
-
-    // 管理者通知
-    for (const a of db.admins) {
-      await client.pushMessage(a, {
-        type: "text",
-        text: `🚨通報\n${t}\n回数:${db.reports[t]}`
-      })
-    }
-
-    if (db.reports[t] >= db.settings.autoBan) {
-      db.blacklist.push(t)
-      await kick(groupId, t)
-      db.reports[t] = 0
-      save()
-      return reply(event, "🚫 自動BAN")
-    }
-
-    save()
-    return reply(event, `通報 ${db.reports[t]}`)
+  if (text === "BANモード" && (isAdmin || isSub)) {
+    userState[userId] = "BAN_MODE"
+    return reply(event, "BANするユーザーIDを送って")
   }
 
-  // ===== NG検知 =====
-  if (db.settings.ngWords.some(w => text.includes(w))) {
-    db.blacklist.push(userId)
-    await kick(groupId, userId)
-    save()
-    return
+  if (userState[userId] === "BAN_MODE") {
+    db.data.banList.push(text.trim())
+    userState[userId] = null
+    await db.write()
+    return reply(event, "BAN完了")
   }
+
+  if (text === "通報") {
+    db.data.reports[userId] = (db.data.reports[userId] || 0) + 1
+    await db.write()
+    return reply(event, "通報しました")
+  }
+
+  return reply(event, "コマンド不明")
 }
 
-// ===== UI =====
-function menuUI(isAdmin, isSub) {
-  return {
+// ===== メニューUI =====
+function sendMenu(event) {
+  return client.replyMessage(event.replyToken, {
     type: "flex",
-    altText: "メニュー",
+    altText: "管理パネル",
     contents: {
       type: "bubble",
       body: {
         type: "box",
         layout: "vertical",
         contents: [
-          { type: "text", text: "管理パネル", weight: "bold" }
-        ]
-      },
-      footer: {
-        type: "box",
-        layout: "vertical",
-        contents: [
-          btn("通報", "通報 @ユーザー"),
-          ...(isAdmin || isSub ? [btn("BAN", "BAN @ユーザー")] : []),
-          ...(isAdmin ? [btn("緊急ON", "緊急ON"), btn("緊急OFF", "緊急OFF")] : [])
+          btn("通報"),
+          btn("BANモード"),
+          btn("緊急オン"),
+          btn("緊急オフ"),
+          btn("設定")
         ]
       }
+    }
+  })
+}
+
+function btn(text) {
+  return {
+    type: "button",
+    action: {
+      type: "message",
+      label: text,
+      text: text
     }
   }
 }
 
-function btn(label, text) {
-  return {
-    type: "button",
-    action: { type: "message", label, text }
-  }
-}
-
-// ===== 共通 =====
-function getMention(e) {
-  return e.message.mention?.mentionees?.[0]?.userId
-}
-
-async function kick(g, u) {
-  try { await client.kickoutFromGroup(g, u) } catch {}
-}
-
 function reply(event, text) {
-  return client.replyMessage(event.replyToken, { type: "text", text })
+  return client.replyMessage(event.replyToken, {
+    type: "text",
+    text
+  })
 }
 
 app.listen(process.env.PORT || 3000)
