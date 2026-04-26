@@ -16,9 +16,11 @@ const DB_FILE = "./db.json"
 // ===== DB =====
 function initDB() {
   return {
-    admins: ["ここを自分のユーザーIDに変える"],
+    admins: [],
     subAdmins: [],
     globalBan: [],
+    reports: {},
+    recentUsers: {},
     groups: {}
   }
 }
@@ -47,6 +49,12 @@ function getGroup(db, groupId) {
     }
   }
   return db.groups[groupId]
+}
+
+// ===== 管理者登録モード =====
+let registerMode = {
+  active: false,
+  expires: 0
 }
 
 // ===== 擬似キック =====
@@ -94,8 +102,46 @@ function menuUI() {
           {
             type: "box",
             layout: "horizontal",
-            contents: [btn("BAN解除", "BAN解除")]
+            contents: [btn("BAN解除", "BAN解除パネル"), btn("管理", "管理UI")]
           }
+        ]
+      }
+    }
+  }
+}
+
+function settingUI() {
+  return {
+    type: "flex",
+    altText: "設定",
+    contents: {
+      type: "bubble",
+      body: {
+        type: "box",
+        layout: "vertical",
+        contents: [
+          { type: "text", text: "⚙️ 設定", weight: "bold" },
+          btn("NG一覧", "NG一覧"),
+          btn("管理", "管理UI")
+        ]
+      }
+    }
+  }
+}
+
+function adminUI() {
+  return {
+    type: "flex",
+    altText: "管理",
+    contents: {
+      type: "bubble",
+      body: {
+        type: "box",
+        layout: "vertical",
+        contents: [
+          { type: "text", text: "👑 管理", weight: "bold" },
+          btn("副管理追加", "副管理追加"),
+          btn("管理一覧", "管理一覧")
         ]
       }
     }
@@ -123,7 +169,38 @@ app.post("/webhook", line.middleware(config), async (req, res) => {
         name = p.displayName
       } catch {}
 
-      // BANチェック
+      // ===== 管理登録モードON =====
+      if (text === "管理登録") {
+        registerMode.active = true
+        registerMode.expires = Date.now() + 30000
+
+        await client.pushMessage(groupId, {
+          type: "text",
+          text: "30秒以内に発言した人を管理者登録します"
+        })
+        continue
+      }
+
+      // ===== 管理者登録 =====
+      if (registerMode.active && Date.now() < registerMode.expires) {
+        if (!db.admins.includes(userId)) {
+          db.admins.push(userId)
+          saveDB(db)
+
+          await client.pushMessage(groupId, {
+            type: "text",
+            text: "👑 管理者登録完了"
+          })
+        }
+        registerMode.active = false
+      }
+
+      // ===== 最近ユーザー =====
+      if (!db.recentUsers[groupId]) db.recentUsers[groupId] = []
+      db.recentUsers[groupId].push({ id: userId, name })
+      db.recentUsers[groupId] = db.recentUsers[groupId].slice(-5)
+
+      // ===== BAN =====
       if (db.globalBan.includes(userId)) {
         await client.pushMessage(groupId, {
           type: "text",
@@ -132,28 +209,25 @@ app.post("/webhook", line.middleware(config), async (req, res) => {
         continue
       }
 
-      // NG判定
+      // ===== NG =====
       if (group.ngWords.some(w => text.includes(w))) {
         await pseudoKick(userId, name, groupId, db)
         continue
       }
 
-      // メニュー
+      // ===== メニュー =====
       if (text === "メニュー") {
         await client.pushMessage(groupId, menuUI())
         continue
       }
 
-      // 設定
+      // ===== 設定 =====
       if (text === "設定") {
-        await client.pushMessage(groupId, {
-          type: "text",
-          text: "設定：NG一覧 / 管理"
-        })
+        await client.pushMessage(groupId, settingUI())
         continue
       }
 
-      // NG一覧
+      // ===== NG一覧 =====
       if (text === "NG一覧") {
         await client.pushMessage(groupId, {
           type: "text",
@@ -162,15 +236,83 @@ app.post("/webhook", line.middleware(config), async (req, res) => {
         continue
       }
 
-      // 通報
-      if (text === "通報") {
+      // ===== 管理UI =====
+      if (text === "管理UI") {
+        if (!isManager(userId, db)) return
+        await client.pushMessage(groupId, adminUI())
+        continue
+      }
+
+      // ===== 副管理追加 =====
+      if (text.startsWith("副管理追加 ")) {
+        if (!isManager(userId, db)) return
+        const id = text.split(" ")[1]
+
+        db.subAdmins.push(id)
+        saveDB(db)
+
         await client.pushMessage(groupId, {
           type: "text",
-          text: "通報は管理者へ"
+          text: "副管理追加完了"
         })
         continue
       }
 
+      // ===== 管理一覧 =====
+      if (text === "管理一覧") {
+        await client.pushMessage(groupId, {
+          type: "text",
+          text:
+            "管理者\n" + db.admins.join("\n") +
+            "\n副管理\n" + db.subAdmins.join("\n")
+        })
+        continue
+      }
+
+      // ===== BAN解除UI =====
+      if (text === "BAN解除パネル") {
+        if (!isManager(userId, db)) return
+
+        await client.pushMessage(groupId, {
+          type: "text",
+          text: db.globalBan.join("\n") || "なし"
+        })
+        continue
+      }
+
+      // ===== 通報 =====
+      if (text === "通報") {
+        await client.pushMessage(groupId, {
+          type: "text",
+          text: "通報: 通報ID Uxxxx"
+        })
+        continue
+      }
+
+      if (text.startsWith("通報ID ")) {
+        const target = text.split(" ")[1]
+
+        db.reports[target] = (db.reports[target] || 0) + 1
+
+        if (db.reports[target] >= 3) {
+          db.globalBan.push(target)
+          saveDB(db)
+
+          await client.pushMessage(groupId, {
+            type: "text",
+            text: "🚫 通報BAN"
+          })
+          continue
+        }
+
+        await client.pushMessage(groupId, {
+          type: "text",
+          text: "通報完了"
+        })
+        continue
+      }
+
+      // ===== デフォルト =====
       await client.pushMessage(groupId, {
         type: "text",
         text: "OK"
