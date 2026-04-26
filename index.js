@@ -1,6 +1,8 @@
 require('dotenv').config();
 const express = require('express');
 const line = require('@line/bot-sdk');
+const { Low } = require('lowdb');
+const { JSONFile } = require('lowdb/node');
 
 const app = express();
 
@@ -11,163 +13,167 @@ const config = {
 
 const client = new line.Client(config);
 
-// ===== 管理データ =====
-let admins = ["U1a1aca9e44466f8cb05003d7dc86fee0"];
-let banList = [];
-let emergency = false;
+// ===== DB =====
+const db = new Low(new JSONFile('db.json'));
+await db.read();
+db.data ||= {
+  superAdmins: ["U1a1aca9e44466f8cb05003d7dc86fee0"],
+  subAdmins: [],
+  banList: [],
+  reports: {},
+  settings: { autoBan: 3 }
+};
 
-const NG_WORDS = ["死ね", "荒らし", "NGワード"];
+// ===== 権限 =====
+const isAdmin = id => db.data.superAdmins.includes(id);
+const isSub = id => db.data.subAdmins.includes(id);
+const isStaff = id => isAdmin(id) || isSub(id);
 
-// ===== Webhook =====
-app.post('/webhook', line.middleware(config), (req, res) => {
-  Promise.all(req.body.events.map(handleEvent))
-    .then(result => res.json(result))
-    .catch(err => {
-      console.error(err);
-      res.status(500).end();
-    });
+// ===== Flex =====
+const flex = (btns) => ({
+  type: "flex",
+  altText: "メニュー",
+  contents: {
+    type: "bubble",
+    body: {
+      type: "box",
+      layout: "vertical",
+      contents: btns.map(b => ({
+        type: "button",
+        style: "primary",
+        action: { type: "message", label: b.label, text: b.text }
+      }))
+    }
+  }
 });
 
-// ===== メイン処理 =====
+// ===== メニュー =====
+const menu = (uid) => {
+  let btns = [
+    { label: "通報", text: "通報" },
+    { label: "ルール", text: "ルール" }
+  ];
+
+  if (isStaff(uid)) {
+    btns.unshift(
+      { label: "管理パネル", text: "管理パネル" }
+    );
+  }
+
+  return flex(btns);
+};
+
+// ===== 管理パネル =====
+const adminPanel = (uid) => {
+  let btns = [
+    { label: "BAN（メンション）", text: "BAN" },
+    { label: "副管理者追加", text: "副管理者追加" },
+    { label: "設定", text: "設定" }
+  ];
+
+  if (isAdmin(uid)) {
+    btns.unshift({ label: "管理者追加", text: "管理追加" });
+  }
+
+  return flex(btns);
+};
+
+// ===== 設定 =====
+const settingsUI = () => flex([
+  { label: `通報BAN:${db.data.settings.autoBan}`, text: "noop" },
+  { label: "+1", text: "設定+" },
+  { label: "-1", text: "設定-" }
+]);
+
+// ===== Webhook =====
+app.post('/webhook', line.middleware(config), async (req, res) => {
+  await db.read();
+
+  await Promise.all(req.body.events.map(handleEvent));
+
+  await db.write();
+  res.json({});
+});
+
+// ===== メイン =====
 async function handleEvent(event) {
 
   const groupId = event.source.groupId;
+  const userId = event.source.userId;
 
-  // ===== 新規参加者 挨拶 =====
+  // ===== 参加 =====
   if (event.type === 'memberJoined') {
     return client.pushMessage(groupId, {
       type: "text",
       text:
 `当グルにご参加頂きありがとうございます😊
-まずは、ノートのルールを確認して下さいね♪
-確認後イイね必ずタップして下さい♪`
+まずはノートのルール確認お願いします♪`
     });
   }
 
-  if (event.type !== 'message' || event.message.type !== 'text') {
+  if (event.type !== 'message') return;
+
+  const text = event.message.text || "";
+
+  console.log(userId, text);
+
+  // ===== BANチェック =====
+  if (db.data.banList.includes(userId)) {
+    await client.leaveGroup(groupId);
     return;
   }
 
-  const userId = event.source.userId;
-  const text = event.message.text;
-
-  console.log("USER:", userId);
-  console.log("TEXT:", text);
-
-  // ===== メニュー表示（iPad対策） =====
+  // ===== メニュー =====
   if (text === "メニュー") {
-    return client.replyMessage(event.replyToken, {
-      type: "text",
-      text:
-`📋 メニュー
-管理追加
-通報
-設定
-緊急ON
-緊急OFF
-ルール
-
-※そのまま文字を送って操作できます`
-    });
+    return client.replyMessage(event.replyToken, menu(userId));
   }
 
-  // ===== BAN済み =====
-  if (banList.includes(userId)) {
-    await client.replyMessage(event.replyToken, {
-      type: "text",
-      text: "🚫 BANされています"
-    });
-    await client.leaveGroup(groupId);
-    return;
+  // ===== 管理パネル =====
+  if (text === "管理パネル" && isStaff(userId)) {
+    return client.replyMessage(event.replyToken, adminPanel(userId));
   }
 
-  // ===== NGワード =====
-  if (NG_WORDS.some(w => text.includes(w))) {
-    banList.push(userId);
+  // ===== 設定 =====
+  if (text === "設定" && isStaff(userId)) {
+    return client.replyMessage(event.replyToken, settingsUI());
+  }
 
-    await client.replyMessage(event.replyToken, {
-      type: "text",
-      text: "⚠️ NGワード → BAN"
-    });
+  if (text === "設定+" && isAdmin(userId)) {
+    db.data.settings.autoBan++;
+  }
 
-    await client.leaveGroup(groupId);
-    return;
+  if (text === "設定-" && isAdmin(userId)) {
+    db.data.settings.autoBan--;
   }
 
   // ===== 通報 =====
   if (text === "通報") {
 
-    const msg = `🚨通報\nユーザーID:${userId}`;
+    db.data.reports[userId] = (db.data.reports[userId] || 0) + 1;
 
-    for (let adminId of admins) {
-      await client.pushMessage(adminId, {
+    if (db.data.reports[userId] >= db.data.settings.autoBan) {
+      db.data.banList.push(userId);
+
+      await client.replyMessage(event.replyToken, {
         type: "text",
-        text: msg
+        text: "🚫 通報多数でBAN"
       });
+
+      await client.leaveGroup(groupId);
+      return;
     }
 
     return client.replyMessage(event.replyToken, {
       type: "text",
-      text: "✅ 通報送信"
+      text: `通報 ${db.data.reports[userId]}回`
     });
   }
 
-  // ===== ルール =====
-  if (text === "ルール") {
-    return client.replyMessage(event.replyToken, {
-      type: "text",
-      text: "📋ルール\n・荒らし禁止\n・迷惑行為禁止\n・違反はBAN"
-    });
-  }
+  // ===== メンションBAN =====
+  if (event.message.mentions && isStaff(userId)) {
+    const target = event.message.mentions.mentionees[0].userId;
 
-  // ===== 設定 =====
-  if (text === "設定") {
-    return client.replyMessage(event.replyToken, {
-      type: "text",
-      text: "⚙️設定メニュー（準備中）"
-    });
-  }
-
-  // ===== 管理者以外ここで終了 =====
-  if (!admins.includes(userId)) return;
-
-  // ===== 管理追加 =====
-  if (text.startsWith("管理追加")) {
-
-    const parts = text.split(" ");
-    const targetId = parts[1];
-
-    if (!targetId) {
-      return client.replyMessage(event.replyToken, {
-        type: "text",
-        text: "例：管理追加 Uxxxxxxxx"
-      });
-    }
-
-    if (!admins.includes(targetId)) {
-      admins.push(targetId);
-    }
-
-    return client.replyMessage(event.replyToken, {
-      type: "text",
-      text: "✅ 管理者追加"
-    });
-  }
-
-  // ===== BAN =====
-  if (text.startsWith("BAN")) {
-
-    const parts = text.split(" ");
-    const targetId = parts[1];
-
-    if (!targetId) {
-      return client.replyMessage(event.replyToken, {
-        type: "text",
-        text: "例：BAN Uxxxxxxxx"
-      });
-    }
-
-    banList.push(targetId);
+    db.data.banList.push(target);
 
     return client.replyMessage(event.replyToken, {
       type: "text",
@@ -175,36 +181,26 @@ async function handleEvent(event) {
     });
   }
 
-  // ===== BAN解除 =====
-  if (text === "BAN解除") {
-    banList = [];
-    return client.replyMessage(event.replyToken, {
-      type: "text",
-      text: "✅ BAN解除"
-    });
+  // ===== 管理追加 =====
+  if (text.startsWith("管理追加") && isAdmin(userId)) {
+    const id = text.split(" ")[1];
+    if (id) db.data.superAdmins.push(id);
   }
 
-  // ===== 緊急ON =====
-  if (text === "緊急ON") {
-    emergency = true;
-    return client.replyMessage(event.replyToken, {
-      type: "text",
-      text: "🚨 緊急ON"
-    });
+  // ===== 副管理者 =====
+  if (text.startsWith("副管理者追加") && isAdmin(userId)) {
+    const id = text.split(" ")[1];
+    if (id) db.data.subAdmins.push(id);
   }
 
-  // ===== 緊急OFF =====
-  if (text === "緊急OFF") {
-    emergency = false;
+  // ===== ルール =====
+  if (text === "ルール") {
     return client.replyMessage(event.replyToken, {
       type: "text",
-      text: "🟢 緊急OFF"
+      text: "荒らし禁止・迷惑行為禁止"
     });
   }
-
-  return;
 }
 
 // ===== 起動 =====
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log("BOT起動中"));
+app.listen(process.env.PORT || 3000, () => console.log("最終BOT起動"));
