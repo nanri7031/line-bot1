@@ -22,7 +22,8 @@ function initDB() {
     scores: {},
     reports: {},
     spam: {},
-    recentUsers: {}
+    recentUsers: {},
+    groups: {}
   }
 }
 
@@ -42,14 +43,20 @@ function isManager(id, db) {
   return db.admins.includes(id) || db.subAdmins.includes(id)
 }
 
-// ===== NG検知 =====
-function isToxic(text) {
-  return /死ね|殺す|バカ+|(.)\1{5,}|https?:\/\//.test(text)
+// ===== グループ設定 =====
+function getGroup(db, groupId) {
+  if (!db.groups[groupId]) {
+    db.groups[groupId] = {
+      ngWords: ["死ね", "荒らし"],
+      autoBanScore: -10
+    }
+  }
+  return db.groups[groupId]
 }
 
-// ===== スコア =====
-function addScore(id, db, val) {
-  db.scores[id] = (db.scores[id] || 0) + val
+// ===== NG判定 =====
+function isToxic(text) {
+  return /死ね|殺す|バカ+|(.)\1{5,}|https?:\/\//.test(text)
 }
 
 // ===== 擬似キック =====
@@ -68,49 +75,77 @@ async function pseudoKick(userId, name, event, db) {
   ])
 }
 
-// ===== 通報UI =====
-function reportUI(db, groupId) {
-  const users = db.recentUsers[groupId] || []
+// ===== UI =====
+function btn(label, text) {
+  return {
+    type: "button",
+    style: "primary",
+    action: { type: "message", label, text }
+  }
+}
 
+function menuUI() {
   return {
     type: "flex",
-    altText: "通報",
+    altText: "メニュー",
     contents: {
       type: "bubble",
       body: {
         type: "box",
         layout: "vertical",
-        contents: users.map(u => ({
-          type: "button",
-          action: {
-            type: "message",
-            label: u.name,
-            text: `通報ID ${u.id}`
+        spacing: "md",
+        contents: [
+          { type: "text", text: "🛠 管理メニュー", weight: "bold", size: "lg" },
+          {
+            type: "box",
+            layout: "horizontal",
+            contents: [btn("通報", "通報"), btn("設定", "設定")]
+          },
+          {
+            type: "box",
+            layout: "horizontal",
+            contents: [btn("BAN解除", "BAN解除パネル"), btn("管理", "管理UI")]
           }
-        }))
+        ]
       }
     }
   }
 }
 
-// ===== BAN解除UI =====
-function unbanUI(db) {
+function settingUI() {
   return {
     type: "flex",
-    altText: "解除",
+    altText: "設定",
     contents: {
       type: "bubble",
       body: {
         type: "box",
         layout: "vertical",
-        contents: db.globalBan.map(id => ({
-          type: "button",
-          action: {
-            type: "message",
-            label: id.slice(0, 6),
-            text: `UNBAN ${id}`
-          }
-        }))
+        contents: [
+          { type: "text", text: "⚙️ 設定", weight: "bold" },
+          btn("NG一覧", "NG一覧"),
+          btn("管理", "管理UI")
+        ]
+      }
+    }
+  }
+}
+
+function adminUI() {
+  return {
+    type: "flex",
+    altText: "管理",
+    contents: {
+      type: "bubble",
+      body: {
+        type: "box",
+        layout: "vertical",
+        contents: [
+          { type: "text", text: "👑 管理", weight: "bold" },
+          btn("管理追加", "管理追加"),
+          btn("副管理追加", "副管理追加"),
+          btn("管理一覧", "管理一覧")
+        ]
       }
     }
   }
@@ -123,38 +158,26 @@ app.post("/webhook", line.middleware(config), async (req, res) => {
 
       const db = loadDB()
 
-      // ===== 参加検知 =====
-      if (event.type === "memberJoined") {
-        const userId = event.joined.members[0].userId
-
-        if (db.globalBan.includes(userId)) {
-          await client.replyMessage(event.replyToken, {
-            type: "text",
-            text: "🚫 BANユーザー参加検知"
-          })
-        }
-        continue
-      }
-
       if (event.type !== "message" || event.message.type !== "text") continue
 
       const text = event.message.text
       const userId = event.source.userId
       const groupId = event.source.groupId || "private"
 
-      // ===== 名前取得 =====
+      const group = getGroup(db, groupId)
+
       let name = "ユーザー"
       try {
         const p = await client.getGroupMemberProfile(groupId, userId)
         name = p.displayName
       } catch {}
 
-      // ===== 最近ユーザー =====
+      // 最近ユーザー
       if (!db.recentUsers[groupId]) db.recentUsers[groupId] = []
       db.recentUsers[groupId].push({ id: userId, name })
       db.recentUsers[groupId] = db.recentUsers[groupId].slice(-5)
 
-      // ===== BANチェック =====
+      // BAN
       if (db.globalBan.includes(userId)) {
         await client.replyMessage(event.replyToken, {
           type: "text",
@@ -163,35 +186,68 @@ app.post("/webhook", line.middleware(config), async (req, res) => {
         continue
       }
 
-      // ===== NGワード =====
-      if (isToxic(text)) {
-        addScore(userId, db, -5)
-      }
-
-      // ===== スパム =====
-      const now = Date.now()
-      if (!db.spam[userId]) db.spam[userId] = []
-      db.spam[userId].push(now)
-      db.spam[userId] = db.spam[userId].filter(t => now - t < 10000)
-
-      if (db.spam[userId].length >= 5) {
+      // NG
+      if (isToxic(text) || group.ngWords.some(w => text.includes(w))) {
         await pseudoKick(userId, name, event, db)
         continue
       }
 
-      // ===== スコアBAN =====
-      if ((db.scores[userId] || 0) <= -10) {
-        await pseudoKick(userId, name, event, db)
+      // ===== メニュー =====
+      if (text === "メニュー") {
+        await client.replyMessage(event.replyToken, menuUI())
         continue
       }
 
-      // ===== 通報UI =====
+      // ===== 設定 =====
+      if (text === "設定") {
+        await client.replyMessage(event.replyToken, settingUI())
+        continue
+      }
+
+      // ===== NG一覧 =====
+      if (text === "NG一覧") {
+        await client.replyMessage(event.replyToken, {
+          type: "text",
+          text: group.ngWords.join("\n")
+        })
+        continue
+      }
+
+      // ===== 管理 =====
+      if (text === "管理UI") {
+        if (!isManager(userId, db)) return
+        await client.replyMessage(event.replyToken, adminUI())
+        continue
+      }
+
+      if (text === "管理一覧") {
+        await client.replyMessage(event.replyToken, {
+          type: "text",
+          text: db.admins.join("\n")
+        })
+        continue
+      }
+
+      // ===== BAN解除 =====
+      if (text === "BAN解除パネル") {
+        if (!isManager(userId, db)) return
+
+        await client.replyMessage(event.replyToken, {
+          type: "text",
+          text: db.globalBan.join("\n") || "なし"
+        })
+        continue
+      }
+
+      // ===== 通報 =====
       if (text === "通報") {
-        await client.replyMessage(event.replyToken, reportUI(db, groupId))
+        await client.replyMessage(event.replyToken, {
+          type: "text",
+          text: "通報したいIDを入力: 通報ID Uxxxx"
+        })
         continue
       }
 
-      // ===== 通報処理 =====
       if (text.startsWith("通報ID ")) {
         const target = text.split(" ")[1]
 
@@ -215,41 +271,6 @@ app.post("/webhook", line.middleware(config), async (req, res) => {
         continue
       }
 
-      // ===== BAN解除 =====
-      if (text === "BAN解除パネル") {
-        if (!isManager(userId, db)) return
-        await client.replyMessage(event.replyToken, unbanUI(db))
-        continue
-      }
-
-      if (text.startsWith("UNBAN ")) {
-        if (!isManager(userId, db)) return
-
-        const id = text.split(" ")[1]
-        db.globalBan = db.globalBan.filter(u => u !== id)
-        saveDB(db)
-
-        await client.replyMessage(event.replyToken, {
-          type: "text",
-          text: "解除完了"
-        })
-        continue
-      }
-
-      // ===== メンション簡易返信 =====
-      const isMentioned =
-        event.message.mention &&
-        event.message.mention.mentionees?.some(m => m.isSelf)
-
-      if (isMentioned) {
-        await client.replyMessage(event.replyToken, {
-          type: "text",
-          text: "呼びました？"
-        })
-        continue
-      }
-
-      // ===== 通常返信 =====
       await client.replyMessage(event.replyToken, {
         type: "text",
         text: "OK"
