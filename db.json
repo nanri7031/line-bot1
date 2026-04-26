@@ -1,9 +1,13 @@
 {
-  "admins": ["U1a1aca9e44466f8cb05003d7dc86fee0"],
-  "subAdmins": [],
-  "globalBan": [],
-  "scores": {},
-  "reports": {},
-  "spam": {},
-  "recentUsers": {}
+  "name": "line-bot",
+  "version": "1.0.0",
+  "type": "module",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "@line/bot-sdk": "^7.5.0",
+    "express": "^4.18.2"
+  }
 }
