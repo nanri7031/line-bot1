@@ -34,10 +34,11 @@ function getGroup(db, gid) {
     db.groups[gid] = {
       admins: [],
       subAdmins: [],
+      adminNames: {},
       ban: [],
       banNames: {},
       reports: {},
-      ngWords: ["死ね", "荒らし"],
+      ngWords: [],
       emergency: false
     }
   }
@@ -52,6 +53,9 @@ function isManager(uid, group) {
 // ===== 状態 =====
 let registerMode = {}
 let reportMode = {}
+let ngAddMode = {}
+let ngRemoveMode = {}
+let banMode = {}
 
 // ===== Webhook =====
 app.post("/webhook", line.middleware(config), async (req, res) => {
@@ -77,121 +81,92 @@ app.post("/webhook", line.middleware(config), async (req, res) => {
         }
       } catch {}
 
-      // ===== BANチェック =====
+      // ===== BAN =====
       if (group.ban.includes(uid)) {
-        await client.replyMessage(event.replyToken, {
-          type: "text",
-          text: "🚫 BANされています"
-        })
+        await client.replyMessage(event.replyToken, { type: "text", text: "🚫 BANされています" })
         continue
       }
 
-      // ===== 通報モード =====
-      if (text === "通報ON") {
+      // ===== BANモード =====
+      if (text === "BANモード") {
         if (!isManager(uid, group)) {
           await client.replyMessage(event.replyToken, { type: "text", text: "権限なし" })
           continue
         }
 
-        reportMode[gid] = true
+        banMode[gid] = true
 
         await client.replyMessage(event.replyToken, {
           type: "text",
-          text: "次の発言者を通報対象"
+          text: "次の発言者をBAN"
         })
         continue
       }
 
-      if (reportMode[gid] && !isManager(uid, group)) {
-        group.reports[uid] = (group.reports[uid] || 0) + 1
-
-        if (group.reports[uid] >= 2) {
-          group.ban.push(uid)
-          group.banNames[uid] = name
-        }
-
-        reportMode[gid] = false
+      if (banMode[gid] && !isManager(uid, group)) {
+        group.ban.push(uid)
+        group.banNames[uid] = name
+        banMode[gid] = false
         saveDB(db)
 
         await client.replyMessage(event.replyToken, {
           type: "text",
-          text: `通報：${name} (${group.reports[uid]}回)`
+          text: `🔨 ${name} をBAN`
         })
         continue
       }
 
-      // ===== 管理登録 =====
-      if (text === "管理登録") {
-        if (!isManager(uid, group)) {
-          await client.replyMessage(event.replyToken, { type: "text", text: "権限なし" })
-          continue
-        }
+      // ===== NG追加 =====
+      if (text === "NG追加") {
+        if (!isManager(uid, group)) continue
 
-        registerMode[gid] = { role: "admin", by: uid }
+        ngAddMode[gid] = true
 
         await client.replyMessage(event.replyToken, {
           type: "text",
-          text: "次の発言者を管理者に登録"
+          text: "追加したいNGワードを送信"
         })
         continue
       }
 
-      if (text === "副管理登録") {
-        if (!isManager(uid, group)) {
-          await client.replyMessage(event.replyToken, { type: "text", text: "権限なし" })
-          continue
-        }
-
-        registerMode[gid] = { role: "sub", by: uid }
-
-        await client.replyMessage(event.replyToken, {
-          type: "text",
-          text: "次の発言者を副管理に登録"
-        })
-        continue
-      }
-
-      if (text === "管理削除") {
-        if (!isManager(uid, group)) {
-          await client.replyMessage(event.replyToken, { type: "text", text: "権限なし" })
-          continue
-        }
-
-        registerMode[gid] = { role: "delete" }
-
-        await client.replyMessage(event.replyToken, {
-          type: "text",
-          text: "次の発言者を管理から削除"
-        })
-        continue
-      }
-
-      if (registerMode[gid] && uid !== registerMode[gid].by) {
-
-        if (registerMode[gid].role === "admin") {
-          if (!group.admins.includes(uid)) group.admins.push(uid)
-        }
-
-        if (registerMode[gid].role === "sub") {
-          if (!group.subAdmins.includes(uid)) group.subAdmins.push(uid)
-        }
-
-        if (registerMode[gid].role === "delete") {
-          group.admins = group.admins.filter(id => id !== uid)
-          group.subAdmins = group.subAdmins.filter(id => id !== uid)
-        }
-
-        delete registerMode[gid]
+      if (ngAddMode[gid]) {
+        group.ngWords.push(text)
+        ngAddMode[gid] = false
         saveDB(db)
 
         await client.replyMessage(event.replyToken, {
           type: "text",
-          text: "完了"
+          text: `NG追加: ${text}`
         })
         continue
       }
 
-      // ===== NGワード =====
+      // ===== NG削除 =====
+      if (text === "NG削除") {
+        if (!isManager(uid, group)) continue
+
+        ngRemoveMode[gid] = true
+
+        await client.replyMessage(event.replyToken, {
+          type: "text",
+          text: `削除したいNGワードを送信\n現在:\n${group.ngWords.join("\n")}`
+        })
+        continue
+      }
+
+      if (ngRemoveMode[gid]) {
+        group.ngWords = group.ngWords.filter(w => w !== text)
+        ngRemoveMode[gid] = false
+        saveDB(db)
+
+        await client.replyMessage(event.replyToken, {
+          type: "text",
+          text: `削除: ${text}`
+        })
+        continue
+      }
+
+      // ===== NG検知 =====
       if (group.ngWords.some(w => text.includes(w))) {
         group.ban.push(uid)
         group.banNames[uid] = name
@@ -199,7 +174,57 @@ app.post("/webhook", line.middleware(config), async (req, res) => {
 
         await client.replyMessage(event.replyToken, {
           type: "text",
-          text: `🔨 ${name} BAN`
+          text: `⚠️ NG → BAN (${name})`
+        })
+        continue
+      }
+
+      // ===== 管理登録 =====
+      if (text === "管理登録" && isManager(uid, group)) {
+        registerMode[gid] = { role: "admin", by: uid }
+        await client.replyMessage(event.replyToken, { type: "text", text: "次の発言者を管理者登録" })
+        continue
+      }
+
+      if (text === "副管理登録" && isManager(uid, group)) {
+        registerMode[gid] = { role: "sub", by: uid }
+        await client.replyMessage(event.replyToken, { type: "text", text: "次の発言者を副管理登録" })
+        continue
+      }
+
+      if (registerMode[gid] && uid !== registerMode[gid].by) {
+
+        if (registerMode[gid].role === "admin") {
+          group.admins.push(uid)
+          group.adminNames[uid] = name
+        }
+
+        if (registerMode[gid].role === "sub") {
+          group.subAdmins.push(uid)
+          group.adminNames[uid] = name
+        }
+
+        delete registerMode[gid]
+        saveDB(db)
+
+        await client.replyMessage(event.replyToken, { type: "text", text: "登録完了" })
+        continue
+      }
+
+      // ===== 管理一覧 =====
+      if (text === "管理一覧") {
+
+        const adminList = group.admins.map(id => group.adminNames[id] || id).join("\n") || "なし"
+        const subList = group.subAdmins.map(id => group.adminNames[id] || id).join("\n") || "なし"
+
+        await client.replyMessage(event.replyToken, {
+          type: "text",
+          text:
+`👑 管理者
+${adminList}
+
+👥 副管理
+${subList}`
         })
         continue
       }
@@ -216,54 +241,38 @@ app.post("/webhook", line.middleware(config), async (req, res) => {
       }
 
       // ===== BAN解除 =====
-      if (text === "BAN解除") {
-        if (!isManager(uid, group)) {
-          await client.replyMessage(event.replyToken, { type: "text", text: "権限なし" })
-          continue
-        }
-
+      if (text === "BAN解除" && isManager(uid, group)) {
         group.ban = []
         group.banNames = {}
         saveDB(db)
 
         await client.replyMessage(event.replyToken, {
           type: "text",
-          text: "全解除"
+          text: "解除完了"
         })
         continue
       }
 
-      // ===== メニュー（完全Flex版） =====
+      // ===== メニュー =====
       if (text === "メニュー") {
         await client.replyMessage(event.replyToken, {
           type: "flex",
-          altText: "管理パネル",
+          altText: "管理",
           contents: {
             type: "bubble",
-            header: {
-              type: "box",
-              layout: "vertical",
-              contents: [
-                {
-                  type: "text",
-                  text: "🛠 管理パネル",
-                  color: "#ffffff",
-                  weight: "bold"
-                }
-              ],
-              backgroundColor: "#1565C0"
-            },
             body: {
               type: "box",
               layout: "vertical",
               spacing: "md",
               contents: [
-                { type: "button", style: "primary", color: "#1976D2", action: { type: "message", label: "👑 管理登録", text: "管理登録" } },
-                { type: "button", style: "primary", color: "#1E88E5", action: { type: "message", label: "👥 副管理登録", text: "副管理登録" } },
-                { type: "button", style: "primary", color: "#42A5F5", action: { type: "message", label: "🗑 管理削除", text: "管理削除" } },
-                { type: "button", style: "primary", color: "#E53935", action: { type: "message", label: "🚨 通報ON", text: "通報ON" } },
-                { type: "button", action: { type: "message", label: "📄 BAN一覧", text: "BAN一覧" } },
-                { type: "button", action: { type: "message", label: "🔓 BAN解除", text: "BAN解除" } }
+                { type: "button", style: "primary", color: "#1976D2", action: { type: "message", label: "管理登録", text: "管理登録" } },
+                { type: "button", style: "primary", color: "#1E88E5", action: { type: "message", label: "副管理登録", text: "副管理登録" } },
+                { type: "button", style: "primary", color: "#42A5F5", action: { type: "message", label: "管理一覧", text: "管理一覧" } },
+                { type: "button", style: "primary", color: "#E53935", action: { type: "message", label: "BANモード", text: "BANモード" } },
+                { type: "button", style: "primary", color: "#FB8C00", action: { type: "message", label: "NG追加", text: "NG追加" } },
+                { type: "button", style: "primary", color: "#8E24AA", action: { type: "message", label: "NG削除", text: "NG削除" } },
+                { type: "button", style: "primary", color: "#1E88E5", action: { type: "message", label: "BAN一覧", text: "BAN一覧" } },
+                { type: "button", style: "primary", color: "#43A047", action: { type: "message", label: "BAN解除", text: "BAN解除" } }
               ]
             }
           }
@@ -271,16 +280,12 @@ app.post("/webhook", line.middleware(config), async (req, res) => {
         continue
       }
 
-      // ===== デフォルト =====
-      await client.replyMessage(event.replyToken, {
-        type: "text",
-        text: "OK"
-      })
+      await client.replyMessage(event.replyToken, { type: "text", text: "OK" })
     }
 
     res.sendStatus(200)
-  } catch (err) {
-    console.log(err)
+  } catch (e) {
+    console.log(e)
     res.sendStatus(500)
   }
 })
