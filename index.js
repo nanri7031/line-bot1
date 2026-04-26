@@ -1,15 +1,15 @@
 // ===== 必要パッケージ =====
 // npm install express @line/bot-sdk
 
-const express = require("express");
+const express = requireの("express");
 const line = require("@line/bot-sdk");
 
 const app = express();
 
 // ===== LINE設定 =====
 const config = {
-  channelAccessToken: "ここにあなたの長期アクセストークン",
-  channelSecret: "ここにチャネルシークレット"
+  channelAccessToken: "ZuBpejw3lChWMM1n59PJq7dQ6fQCWRqexOVRx74UcjA3twD1yt+dvfXDRxUBhbI0l3xX7BQ7c+xSirNmRAWnmk/w1R7IMhlKToJnQtiORz2opDAuPx3ndckC3saC509mbva/C7FkLQy99Ozp/vz8igdB04t89/1O/w1cDnyilFU=",
+  channelSecret: "27b76eec6bcfefb6183dd2a79fb42896"
 };
 
 const client = new line.Client(config);
