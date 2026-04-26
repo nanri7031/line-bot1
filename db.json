@@ -3,7 +3,6 @@
   "subAdmins": [],
   "banList": [],
   "reports": {},
-  "userCounts": {},
   "emergency": false,
   "settings": {
     "autoBan": 3,
