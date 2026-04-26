@@ -1,10 +1,6 @@
 import express from "express"
 import line from "@line/bot-sdk"
-import dotenv from "dotenv"
-import { Low } from "lowdb"
-import { JSONFile } from "lowdb/node"
-
-dotenv.config()
+import fs from "fs"
 
 const app = express()
 
@@ -15,118 +11,202 @@ const config = {
 
 const client = new line.Client(config)
 
-// ✅ DB（完全修正）
-const adapter = new JSONFile("db.json")
-const db = new Low(adapter, {
-  admins: [],
-  subAdmins: [],
-  banList: [],
-  reports: {},
-  settings: {
-    autoBan: 3,
-    ngWords: []
-  }
-})
+// ===== DB =====
+let db = {}
+try {
+  db = JSON.parse(fs.readFileSync("./db.json", "utf-8"))
+} catch { db = {} }
 
-await db.read()
-await db.write()
+db.admins ||= []
+db.subAdmins ||= []
+db.reports ||= {}
+db.blacklist ||= []
+db.settings ||= {
+  autoBan: 3,
+  ngWords: [],
+  emergency: false
+}
 
-// Webhook
+const save = () =>
+  fs.writeFileSync("./db.json", JSON.stringify(db, null, 2))
+
+// ===== Webhook =====
 app.post("/webhook", line.middleware(config), async (req, res) => {
-  const events = req.body.events
-  await Promise.all(events.map(handleEvent))
+  await Promise.all(req.body.events.map(handleEvent))
   res.sendStatus(200)
 })
 
-// 動作確認用（←これがポート解決）
-app.get("/", (req, res) => {
-  res.send("BOT is running")
-})
+app.get("/", (req, res) => res.send("RUNNING"))
 
+// ===== メイン =====
 async function handleEvent(event) {
+
+  // ===== 参加時ブラックリストキック =====
+  if (event.type === "memberJoined") {
+    for (const m of event.joined.members) {
+      if (db.blacklist.includes(m.userId)) {
+        await client.kickoutFromGroup(event.source.groupId, m.userId)
+      }
+    }
+    return
+  }
+
   if (event.type !== "message" || event.message.type !== "text") return
 
   const text = event.message.text
   const userId = event.source.userId
   const groupId = event.source.groupId
 
-  if (text === "管理者登録") {
-    if (!db.data.admins.includes(userId)) {
-      db.data.admins.push(userId)
-      await db.write()
-      return reply(event, "管理者登録完了")
-    }
-    return reply(event, "既に管理者です")
+  const isAdmin = db.admins.includes(userId)
+  const isSub = db.subAdmins.includes(userId)
+
+  // ===== 初期管理者 =====
+  if (text === "管理者登録" && db.admins.length === 0) {
+    db.admins.push(userId)
+    save()
+    return reply(event, "👑 管理人登録")
   }
 
+  // ===== 緊急モード =====
+  if (isAdmin && text === "緊急ON") {
+    db.settings.emergency = true
+    save()
+    return reply(event, "🚨 ON")
+  }
+
+  if (isAdmin && text === "緊急OFF") {
+    db.settings.emergency = false
+    save()
+    return reply(event, "OFF")
+  }
+
+  if (db.settings.emergency && !(isAdmin || isSub)) {
+    await kick(groupId, userId)
+    return
+  }
+
+  // ===== メニューUI =====
   if (text === "メニュー") {
-    return reply(event,
-`【管理メニュー】
-・通報 @ユーザー
-・BAN @ユーザー
-・NG追加 ワード
-・設定`)
+    return client.replyMessage(event.replyToken, menuUI(isAdmin, isSub))
   }
 
+  // ===== 副管理 =====
+  if (isAdmin && text.startsWith("副管理追加")) {
+    const t = getMention(event)
+    db.subAdmins.push(t)
+    save()
+    return reply(event, "追加OK")
+  }
+
+  if (isAdmin && text.startsWith("副管理削除")) {
+    const t = getMention(event)
+    db.subAdmins = db.subAdmins.filter(id => id !== t)
+    save()
+    return reply(event, "削除OK")
+  }
+
+  // ===== NG =====
+  if ((isAdmin || isSub) && text.startsWith("NG追加 ")) {
+    db.settings.ngWords.push(text.replace("NG追加 ", ""))
+    save()
+    return reply(event, "追加OK")
+  }
+
+  if (isAdmin && text.startsWith("NG削除 ")) {
+    db.settings.ngWords =
+      db.settings.ngWords.filter(w => w !== text.replace("NG削除 ", ""))
+    save()
+    return reply(event, "削除OK")
+  }
+
+  // ===== BAN =====
+  if ((isAdmin || isSub) && text.startsWith("BAN")) {
+    const t = getMention(event)
+    db.blacklist.push(t)
+    save()
+    await kick(groupId, t)
+    return reply(event, "🚫 BAN")
+  }
+
+  // ===== 通報 =====
   if (text.startsWith("通報")) {
-    const mention = event.message.mention
-    if (!mention) return reply(event, "メンションしてね")
+    const t = getMention(event)
+    db.reports[t] = (db.reports[t] || 0) + 1
 
-    const target = mention.mentionees[0].userId
-
-    db.data.reports[target] = (db.data.reports[target] || 0) + 1
-
-    if (db.data.reports[target] >= db.data.settings.autoBan) {
-      await client.kickoutFromGroup(groupId, [target])
-      db.data.banList.push(target)
-      await db.write()
-      return reply(event, "自動BANしました")
+    // 管理者通知
+    for (const a of db.admins) {
+      await client.pushMessage(a, {
+        type: "text",
+        text: `🚨通報\n${t}\n回数:${db.reports[t]}`
+      })
     }
 
-    await db.write()
-    return reply(event, `通報数: ${db.data.reports[target]}`)
+    if (db.reports[t] >= db.settings.autoBan) {
+      db.blacklist.push(t)
+      await kick(groupId, t)
+      db.reports[t] = 0
+      save()
+      return reply(event, "🚫 自動BAN")
+    }
+
+    save()
+    return reply(event, `通報 ${db.reports[t]}`)
   }
 
-  if (text.startsWith("BAN")) {
-    const mention = event.message.mention
-    if (!mention) return reply(event, "メンションしてね")
-
-    const target = mention.mentionees[0].userId
-    await client.kickoutFromGroup(groupId, [target])
-    return reply(event, "BAN完了")
+  // ===== NG検知 =====
+  if (db.settings.ngWords.some(w => text.includes(w))) {
+    db.blacklist.push(userId)
+    await kick(groupId, userId)
+    save()
+    return
   }
+}
 
-  if (text.startsWith("NG追加")) {
-    const word = text.replace("NG追加 ", "")
-    db.data.settings.ngWords.push(word)
-    await db.write()
-    return reply(event, `追加: ${word}`)
-  }
-
-  for (const word of db.data.settings.ngWords) {
-    if (text.includes(word)) {
-      await client.kickoutFromGroup(groupId, [userId])
-      return
+// ===== UI =====
+function menuUI(isAdmin, isSub) {
+  return {
+    type: "flex",
+    altText: "メニュー",
+    contents: {
+      type: "bubble",
+      body: {
+        type: "box",
+        layout: "vertical",
+        contents: [
+          { type: "text", text: "管理パネル", weight: "bold" }
+        ]
+      },
+      footer: {
+        type: "box",
+        layout: "vertical",
+        contents: [
+          btn("通報", "通報 @ユーザー"),
+          ...(isAdmin || isSub ? [btn("BAN", "BAN @ユーザー")] : []),
+          ...(isAdmin ? [btn("緊急ON", "緊急ON"), btn("緊急OFF", "緊急OFF")] : [])
+        ]
+      }
     }
   }
+}
 
-  if (text === "設定") {
-    return reply(event,
-`【設定】
-自動BAN回数: ${db.data.settings.autoBan}
-NGワード: ${db.data.settings.ngWords.join(", ")}`)
+function btn(label, text) {
+  return {
+    type: "button",
+    action: { type: "message", label, text }
   }
+}
 
-  return reply(event, "コマンド不明")
+// ===== 共通 =====
+function getMention(e) {
+  return e.message.mention?.mentionees?.[0]?.userId
+}
+
+async function kick(g, u) {
+  try { await client.kickoutFromGroup(g, u) } catch {}
 }
 
 function reply(event, text) {
-  return client.replyMessage(event.replyToken, {
-    type: "text",
-    text
-  })
+  return client.replyMessage(event.replyToken, { type: "text", text })
 }
 
-// ❗ポート修正（これ重要）
-const PORT = process.env.PORT || 3000
-app.listen(PORT, () => console.log("Server running on " + PORT))
+app.listen(process.env.PORT || 3000)
