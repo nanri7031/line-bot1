@@ -10,13 +10,14 @@ const config = {
 }
 
 const client = new line.Client(config)
-
 const DB_FILE = "./db.json"
 
 // ===== DB =====
 function initDB() {
   return {
     admins: [],
+    subAdmins: [],
+    globalBan: [],
     groups: {}
   }
 }
@@ -32,15 +33,23 @@ function saveDB(db) {
   fs.writeFileSync(DB_FILE, JSON.stringify(db, null, 2))
 }
 
+// ===== 権限 =====
 function isAdmin(id, db) {
   return db.admins.includes(id)
 }
 
+function isManager(id, db) {
+  return db.admins.includes(id) || db.subAdmins.includes(id)
+}
+
+// ===== グループ =====
 function getGroup(db, id) {
   if (!db.groups[id]) {
     db.groups[id] = {
+      ngWords: ["死ね", "荒らし"],
       emergency: false,
-      welcome: "ようこそ！ルール確認してね"
+      welcome: "ようこそ！ルール確認してね",
+      scores: {}
     }
   }
   return db.groups[id]
@@ -48,6 +57,14 @@ function getGroup(db, id) {
 
 // ===== 管理登録 =====
 let registerMode = { active: false, expires: 0 }
+
+// ===== BAN =====
+function addScore(group, userId) {
+  if (!group.scores[userId]) group.scores[userId] = 0
+  group.scores[userId]++
+
+  return group.scores[userId]
+}
 
 // ===== Webhook =====
 app.post("/webhook", line.middleware(config), async (req, res) => {
@@ -57,12 +74,12 @@ app.post("/webhook", line.middleware(config), async (req, res) => {
 
       const db = loadDB()
 
-      // ===== 参加挨拶 =====
+      // ===== 参加 =====
       if (event.type === "memberJoined") {
-        const groupId = event.source.groupId
-        const group = getGroup(db, groupId)
+        const gid = event.source.groupId
+        const group = getGroup(db, gid)
 
-        await client.pushMessage(groupId, {
+        await client.pushMessage(gid, {
           type: "text",
           text: group.welcome
         })
@@ -74,15 +91,22 @@ app.post("/webhook", line.middleware(config), async (req, res) => {
 
       const text = event.message.text.trim()
       const userId = event.source.userId
-      const groupId = event.source.groupId
-      const to = groupId || userId
+      const gid = event.source.groupId || userId
 
-      const group = getGroup(db, to)
+      const group = getGroup(db, gid)
+
+      // ===== BAN済 =====
+      if (db.globalBan.includes(userId)) {
+        await client.replyMessage(event.replyToken, {
+          type: "text",
+          text: "🚫 BANされています"
+        })
+        return
+      }
 
       // ===== 管理登録 =====
       if (text === "管理登録") {
-        registerMode.active = true
-        registerMode.expires = Date.now() + 30000
+        registerMode = { active: true, expires: Date.now() + 30000 }
 
         await client.replyMessage(event.replyToken, {
           type: "text",
@@ -105,33 +129,75 @@ app.post("/webhook", line.middleware(config), async (req, res) => {
         return
       }
 
-      // ===== 緊急モード =====
-      if (text === "緊急ON" && isAdmin(userId, db)) {
+      // ===== 緊急 =====
+      if (text === "緊急ON" && isManager(userId, db)) {
         group.emergency = true
         saveDB(db)
 
         await client.replyMessage(event.replyToken, {
           type: "text",
-          text: "🚨 緊急モードON"
+          text: "🚨 緊急ON"
         })
         return
       }
 
-      if (text === "緊急OFF" && isAdmin(userId, db)) {
+      if (text === "緊急OFF" && isManager(userId, db)) {
         group.emergency = false
         saveDB(db)
 
         await client.replyMessage(event.replyToken, {
           type: "text",
-          text: "✅ 緊急モード解除"
+          text: "解除"
         })
         return
       }
 
-      if (group.emergency && !isAdmin(userId, db)) {
+      if (group.emergency && !isManager(userId, db)) {
         await client.replyMessage(event.replyToken, {
           type: "text",
-          text: "🚫 現在発言できません"
+          text: "🚫 発言禁止"
+        })
+        return
+      }
+
+      // ===== NG検知 =====
+      if (group.ngWords.some(w => text.includes(w))) {
+        const score = addScore(group, userId)
+
+        if (score >= 2) {
+          db.globalBan.push(userId)
+          saveDB(db)
+
+          await client.replyMessage(event.replyToken, {
+            type: "text",
+            text: "🔨 BANしました"
+          })
+        } else {
+          await client.replyMessage(event.replyToken, {
+            type: "text",
+            text: "⚠️ 注意"
+          })
+        }
+        return
+      }
+
+      // ===== BAN解除 =====
+      if (text === "BAN解除" && isManager(userId, db)) {
+        db.globalBan = []
+        saveDB(db)
+
+        await client.replyMessage(event.replyToken, {
+          type: "text",
+          text: "BAN解除しました"
+        })
+        return
+      }
+
+      // ===== 管理一覧 =====
+      if (text === "管理一覧") {
+        await client.replyMessage(event.replyToken, {
+          type: "text",
+          text: "管理者数：" + db.admins.length
         })
         return
       }
@@ -140,12 +206,16 @@ app.post("/webhook", line.middleware(config), async (req, res) => {
       if (text.includes("メニュー")) {
         await client.replyMessage(event.replyToken, {
           type: "text",
-          text: "📋 管理メニュー\n・管理登録\n・緊急ON\n・緊急OFF"
+          text:
+`📋 管理メニュー
+・管理登録
+・管理一覧
+・緊急ON / OFF
+・BAN解除`
         })
         return
       }
 
-      // ===== デフォルト =====
       await client.replyMessage(event.replyToken, {
         type: "text",
         text: "受信OK"
@@ -153,9 +223,8 @@ app.post("/webhook", line.middleware(config), async (req, res) => {
     }
 
     res.sendStatus(200)
-
-  } catch (err) {
-    console.log(err)
+  } catch (e) {
+    console.log(e)
     res.sendStatus(500)
   }
 })
