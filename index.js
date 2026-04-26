@@ -18,42 +18,51 @@ const DB_FILE = "./db.json"
 function initDB() {
   return {
     admins: ["U1a1aca9e44466f8cb05003d7dc86fee0"],
-    banList: [],
+    globalBan: [],
     reports: {},
     counts: {},
     spam: {},
     logs: [],
-    joined: {},
-    emergency: false,
-    groups: {},
-    settings: {
-      autoBan: 3,
-      reportBan: 3,
-      ngWords: ["死ね", "荒らし"]
-    }
+    groups: {}
   }
 }
 
 function loadDB() {
-  try {
-    if (!fs.existsSync(DB_FILE)) {
-      fs.writeFileSync(DB_FILE, JSON.stringify(initDB(), null, 2))
-    }
-    return JSON.parse(fs.readFileSync(DB_FILE))
-  } catch {
-    return initDB()
+  if (!fs.existsSync(DB_FILE)) {
+    fs.writeFileSync(DB_FILE, JSON.stringify(initDB(), null, 2))
   }
+  return JSON.parse(fs.readFileSync(DB_FILE))
 }
 
 function saveDB(db) {
   fs.writeFileSync(DB_FILE, JSON.stringify(db, null, 2))
 }
 
-// ===== 管理者通知 =====
-function notifyAdmins(msg, db) {
-  db.admins.forEach(id => {
-    client.pushMessage(id, { type: "text", text: msg })
-  })
+// ===== グループ初期化 =====
+function initGroup(db, groupId) {
+  if (!db.groups[groupId]) {
+    db.groups[groupId] = {
+      welcomeMessage: "👣 ようこそ {name} さん！\n📌 ノート確認してイイね！",
+      ngWords: ["死ね", "荒らし"],
+      autoBan: 3
+    }
+  }
+}
+
+// ===== AI検知 =====
+function isToxic(text) {
+  return /死ね|殺す|バカ+|(.)\1{5,}|https?:\/\//.test(text)
+}
+
+// ===== 擬似キック =====
+async function pseudoKick(userId, name, event, db) {
+  db.globalBan.push(userId)
+  saveDB(db)
+
+  await client.replyMessage(event.replyToken, [
+    { type: "text", text: `🔨 ${name} を強制退出しました` },
+    { type: "text", text: "🚫 再参加禁止" }
+  ])
 }
 
 // ===== UI =====
@@ -68,9 +77,8 @@ function menuUI() {
         layout: "vertical",
         contents: [
           { type: "text", text: "管理パネル", weight: "bold" },
+          btn("挨拶確認"),
           btn("設定"),
-          btn("緊急ON"),
-          btn("緊急OFF"),
           btn("通報")
         ]
       }
@@ -92,84 +100,54 @@ app.post("/webhook", line.middleware(config), async (req, res) => {
 
       const db = loadDB()
 
+      const groupId = event.source.groupId || "private"
+      initGroup(db, groupId)
+      const group = db.groups[groupId]
+
       // ===== 参加 =====
       if (event.type === "memberJoined") {
         const userId = event.joined.members[0].userId
-        const groupId = event.source.groupId
 
-        let name = "新規ユーザー"
+        if (db.globalBan.includes(userId)) {
+          await client.replyMessage(event.replyToken, {
+            type: "text",
+            text: "🚫 BANユーザー"
+          })
+          continue
+        }
+
+        let name = "ユーザー"
         try {
           const p = await client.getGroupMemberProfile(groupId, userId)
           name = p.displayName
         } catch {}
 
-        if (db.banList.includes(userId)) {
-          await client.replyMessage(event.replyToken, {
-            type: "text",
-            text: "🚫 BANユーザー参加"
-          })
-          continue
-        }
+        const msg = group.welcomeMessage.replace("{name}", name)
 
-        if (!db.joined[userId]) {
-          db.joined[userId] = true
-          saveDB(db)
-
-          await client.replyMessage(event.replyToken, {
-            type: "text",
-            text:
-              `👣 ようこそ ${name} さん\n\n` +
-              `・荒らし禁止\n・NG注意\n\n` +
-              `📌 ノート確認してイイね！\n\n` +
-              `「メニュー」で操作`
-          })
-          continue
-        }
-      }
-
-      // ===== メッセージ以外無視 =====
-      if (event.type !== "message" || event.message.type !== "text") continue
-
-      const text = event.message.text
-      const userId = event.source.userId
-      const groupId = event.source.groupId || "private"
-
-      if (!db.groups[groupId]) {
-        db.groups[groupId] = {
-          ngWords: [...db.settings.ngWords]
-        }
-      }
-
-      const group = db.groups[groupId]
-
-      // 名前取得
-      let name = "不明"
-      try {
-        const p = groupId === "private"
-          ? await client.getProfile(userId)
-          : await client.getGroupMemberProfile(groupId, userId)
-        name = p.displayName
-      } catch {}
-
-      // ログ
-      db.logs.push(`${name}: ${text}`)
-      if (db.logs.length > 50) db.logs.shift()
-
-      // ===== BAN =====
-      if (db.banList.includes(userId)) {
         await client.replyMessage(event.replyToken, {
           type: "text",
-          text: "🚫 制限中"
+          text: msg
         })
         continue
       }
 
-      // ===== 緊急 =====
-      if (db.emergency && !db.admins.includes(userId)) {
+      if (event.type !== "message" || event.message.type !== "text") continue
+
+      const text = event.message.text
+      const userId = event.source.userId
+
+      // ===== BAN =====
+      if (db.globalBan.includes(userId)) {
         await client.replyMessage(event.replyToken, {
           type: "text",
-          text: "🚨 制限中"
+          text: "🚫 発言禁止"
         })
+        continue
+      }
+
+      // ===== AI =====
+      if (isToxic(text)) {
+        await pseudoKick(userId, "ユーザー", event, db)
         continue
       }
 
@@ -180,14 +158,7 @@ app.post("/webhook", line.middleware(config), async (req, res) => {
       db.spam[userId] = db.spam[userId].filter(t => now - t < 10000)
 
       if (db.spam[userId].length >= 5) {
-        db.banList.push(userId)
-        notifyAdmins(`🚫 スパムBAN: ${name}`, db)
-        saveDB(db)
-
-        await client.replyMessage(event.replyToken, {
-          type: "text",
-          text: "🚫 スパムBAN"
-        })
+        await pseudoKick(userId, "ユーザー", event, db)
         continue
       }
 
@@ -195,15 +166,8 @@ app.post("/webhook", line.middleware(config), async (req, res) => {
       if (group.ngWords.some(w => text.includes(w))) {
         db.counts[userId] = (db.counts[userId] || 0) + 1
 
-        if (db.counts[userId] >= db.settings.autoBan) {
-          db.banList.push(userId)
-          notifyAdmins(`🚫 NG BAN: ${name}`, db)
-          saveDB(db)
-
-          await client.replyMessage(event.replyToken, {
-            type: "text",
-            text: "🚫 BAN"
-          })
+        if (db.counts[userId] >= group.autoBan) {
+          await pseudoKick(userId, "ユーザー", event, db)
           continue
         }
 
@@ -216,13 +180,36 @@ app.post("/webhook", line.middleware(config), async (req, res) => {
         continue
       }
 
-      // ===== 通報 =====
-      if (text === "通報") {
-        db.reports[userId] = (db.reports[userId] || 0) + 1
+      // ===== 挨拶変更 =====
+      if (text.startsWith("挨拶設定 ")) {
+        const msg = text.replace("挨拶設定 ", "")
+        group.welcomeMessage = msg
+        saveDB(db)
 
-        if (db.reports[userId] >= db.settings.reportBan) {
-          db.banList.push(userId)
-          notifyAdmins(`🚫 通報BAN: ${name}`, db)
+        await client.replyMessage(event.replyToken, {
+          type: "text",
+          text: "挨拶更新完了"
+        })
+        continue
+      }
+
+      // ===== 挨拶確認 =====
+      if (text === "挨拶確認") {
+        await client.replyMessage(event.replyToken, {
+          type: "text",
+          text: group.welcomeMessage
+        })
+        continue
+      }
+
+      // ===== 通報 =====
+      if (text.startsWith("通報 ")) {
+        const target = text.split(" ")[1]
+
+        db.reports[target] = (db.reports[target] || 0) + 1
+
+        if (db.reports[target] >= 3) {
+          db.globalBan.push(target)
           saveDB(db)
 
           await client.replyMessage(event.replyToken, {
@@ -241,17 +228,9 @@ app.post("/webhook", line.middleware(config), async (req, res) => {
         continue
       }
 
-      // ===== UI =====
+      // ===== メニュー =====
       if (text === "メニュー") {
         await client.replyMessage(event.replyToken, menuUI())
-        continue
-      }
-
-      if (text === "設定") {
-        await client.replyMessage(event.replyToken, {
-          type: "text",
-          text: `NG: ${group.ngWords.join(", ")}`
-        })
         continue
       }
 
@@ -264,15 +243,6 @@ app.post("/webhook", line.middleware(config), async (req, res) => {
         continue
       }
 
-      if (Math.random() < 0.2) {
-        await client.replyMessage(event.replyToken, {
-          type: "text",
-          text: ["いいね👍", "それな", "草"][Math.floor(Math.random()*3)]
-        })
-        continue
-      }
-
-      // ===== デフォルト =====
       await client.replyMessage(event.replyToken, {
         type: "text",
         text: "OK"
