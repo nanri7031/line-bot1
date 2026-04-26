@@ -1,4 +1,6 @@
 {
   "admins": [],
+  "subAdmins": [],
+  "globalBan": [],
   "groups": {}
 }
