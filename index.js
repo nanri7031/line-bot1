@@ -15,12 +15,9 @@ const config = {
 
 const client = new line.Client(config)
 
-// DB
+// ✅ DB（完全修正）
 const adapter = new JSONFile("db.json")
-const db = new Low(adapter)
-
-await db.read()
-db.data ||= {
+const db = new Low(adapter, {
   admins: [],
   subAdmins: [],
   banList: [],
@@ -29,7 +26,9 @@ db.data ||= {
     autoBan: 3,
     ngWords: []
   }
-}
+})
+
+await db.read()
 await db.write()
 
 // Webhook
@@ -39,7 +38,11 @@ app.post("/webhook", line.middleware(config), async (req, res) => {
   res.sendStatus(200)
 })
 
-// メイン処理
+// 動作確認用（←これがポート解決）
+app.get("/", (req, res) => {
+  res.send("BOT is running")
+})
+
 async function handleEvent(event) {
   if (event.type !== "message" || event.message.type !== "text") return
 
@@ -47,16 +50,15 @@ async function handleEvent(event) {
   const userId = event.source.userId
   const groupId = event.source.groupId
 
-  // 管理者登録
   if (text === "管理者登録") {
     if (!db.data.admins.includes(userId)) {
       db.data.admins.push(userId)
       await db.write()
       return reply(event, "管理者登録完了")
     }
+    return reply(event, "既に管理者です")
   }
 
-  // メニュー
   if (text === "メニュー") {
     return reply(event,
 `【管理メニュー】
@@ -66,7 +68,6 @@ async function handleEvent(event) {
 ・設定`)
   }
 
-  // 通報
   if (text.startsWith("通報")) {
     const mention = event.message.mention
     if (!mention) return reply(event, "メンションしてね")
@@ -86,7 +87,6 @@ async function handleEvent(event) {
     return reply(event, `通報数: ${db.data.reports[target]}`)
   }
 
-  // BAN
   if (text.startsWith("BAN")) {
     const mention = event.message.mention
     if (!mention) return reply(event, "メンションしてね")
@@ -96,7 +96,6 @@ async function handleEvent(event) {
     return reply(event, "BAN完了")
   }
 
-  // NGワード追加
   if (text.startsWith("NG追加")) {
     const word = text.replace("NG追加 ", "")
     db.data.settings.ngWords.push(word)
@@ -104,7 +103,6 @@ async function handleEvent(event) {
     return reply(event, `追加: ${word}`)
   }
 
-  // NGワード検知
   for (const word of db.data.settings.ngWords) {
     if (text.includes(word)) {
       await client.kickoutFromGroup(groupId, [userId])
@@ -112,7 +110,6 @@ async function handleEvent(event) {
     }
   }
 
-  // 設定
   if (text === "設定") {
     return reply(event,
 `【設定】
@@ -123,7 +120,6 @@ NGワード: ${db.data.settings.ngWords.join(", ")}`)
   return reply(event, "コマンド不明")
 }
 
-// 返信
 function reply(event, text) {
   return client.replyMessage(event.replyToken, {
     type: "text",
@@ -131,4 +127,6 @@ function reply(event, text) {
   })
 }
 
-app.listen(3000, () => console.log("Server running"))
+// ❗ポート修正（これ重要）
+const PORT = process.env.PORT || 3000
+app.listen(PORT, () => console.log("Server running on " + PORT))
