@@ -3,12 +3,8 @@ import line from "@line/bot-sdk"
 import dotenv from "dotenv"
 import { Low } from "lowdb"
 import { JSONFile } from "lowdb/node"
-import { fileURLToPath } from "url"
-import { dirname, join } from "path"
 
 dotenv.config()
-
-const __dirname = dirname(fileURLToPath(import.meta.url))
 
 const app = express()
 
@@ -19,162 +15,229 @@ const config = {
 
 const client = new line.Client(config)
 
-// ===== DB設定（絶対安定版）=====
-const adapter = new JSONFile(join(__dirname, "db.json"))
-const db = new Low(adapter, {
+// DB
+const db = new Low(new JSONFile("db.json"))
+await db.read()
+
+db.data ||= {
   admins: ["U1a1aca9e44466f8cb05003d7dc86fee0"],
   subAdmins: [],
   banList: [],
   reports: {},
   userCounts: {},
   emergency: false,
+  logs: [],
   settings: {
     autoBan: 3,
     ngWords: ["死ね", "荒らし"]
   }
-})
+}
 
-await db.read()
 await db.write()
 
-// ===== 状態管理 =====
-const userState = {}
-
+// Webhook
 app.post("/webhook", line.middleware(config), async (req, res) => {
   await Promise.all(req.body.events.map(handleEvent))
   res.sendStatus(200)
 })
 
+// =======================
+// 🖥 Web管理画面
+// =======================
+app.get("/", async (req, res) => {
+  await db.read()
+
+  res.send(`
+    <h1>BOT管理画面</h1>
+    <p>緊急モード: ${db.data.emergency}</p>
+
+    <h2>NGワード</h2>
+    <pre>${db.data.settings.ngWords.join(", ")}</pre>
+
+    <h2>通報</h2>
+    <pre>${JSON.stringify(db.data.reports, null, 2)}</pre>
+
+    <h2>BANリスト</h2>
+    <pre>${db.data.banList.join("\n")}</pre>
+  `)
+})
+
+// =======================
+// メイン処理
+// =======================
 async function handleEvent(event) {
-  if (event.type !== "message" || event.message.type !== "text") return
+
+  await db.read()
+
+  // 👣 参加ログ
+  if (event.type === "memberJoined") {
+    db.data.logs.push(`参加: ${JSON.stringify(event.source)}`)
+    await db.write()
+
+    return client.replyMessage(event.replyToken, {
+      type: "text",
+      text: "👣 新しいメンバーが参加しました"
+    })
+  }
+
+  // 👣 退出ログ
+  if (event.type === "memberLeft") {
+    db.data.logs.push(`退出: ${JSON.stringify(event.source)}`)
+    await db.write()
+    return
+  }
+
+  if (event.type !== "message") return
+  if (event.message.type !== "text") return
 
   const text = event.message.text
   const userId = event.source.userId
 
-  const isAdmin = db.data.admins.includes(userId)
-  const isSub = db.data.subAdmins.includes(userId)
+  const {
+    admins,
+    subAdmins,
+    banList,
+    userCounts,
+    emergency,
+    settings
+  } = db.data
 
-  // BAN済み
-  if (db.data.banList.includes(userId)) {
-    return reply(event, "あなたはBANされています")
+  const { ngWords, autoBan } = settings
+
+  const isAdmin = admins.includes(userId)
+  const isSubAdmin = subAdmins.includes(userId)
+
+  // 🚫 BAN済み
+  if (banList.includes(userId)) {
+    return client.replyMessage(event.replyToken, {
+      type: "text",
+      text: "🚫 BANされています"
+    })
   }
 
-  // 緊急モード
-  if (db.data.emergency && !isAdmin) {
-    return reply(event, "現在緊急モード中")
+  // 🚨 緊急モード
+  if (emergency && !isAdmin) {
+    return client.replyMessage(event.replyToken, {
+      type: "text",
+      text: "🚨 緊急モード中"
+    })
   }
 
-  // NGワード処理
-  for (let word of db.data.settings.ngWords) {
-    if (text.includes(word) && !isAdmin && !isSub) {
-      db.data.userCounts[userId] = (db.data.userCounts[userId] || 0) + 1
+  // 🔥 NG検知
+  const isNG = ngWords.some(w => text.includes(w))
 
-      if (db.data.userCounts[userId] >= db.data.settings.autoBan) {
-        db.data.banList.push(userId)
-        await db.write()
-        return reply(event, "自動BANしました")
-      }
+  if (isNG && !isAdmin && !isSubAdmin) {
+    userCounts[userId] = (userCounts[userId] || 0) + 1
 
+    if (userCounts[userId] >= autoBan) {
+      banList.push(userId)
       await db.write()
-      return reply(event, `警告 (${db.data.userCounts[userId]})`)
+
+      // 📩 管理者通知
+      admins.forEach(id => {
+        client.pushMessage(id, {
+          type: "text",
+          text: `🚨 自動BAN\nユーザー: ${userId}`
+        })
+      })
+
+      return client.replyMessage(event.replyToken, {
+        type: "text",
+        text: "🚫 BANしました"
+      })
     }
-  }
 
-  // ===== コマンド =====
-
-  if (text === "メニュー") return sendMenu(event)
-
-  if (text === "設定" && (isAdmin || isSub)) {
-    return reply(event, `【設定】
-BAN回数:${db.data.settings.autoBan}
-NG:${db.data.settings.ngWords.join(",")}`)
-  }
-
-  if (text.startsWith("NG追加") && (isAdmin || isSub)) {
-    const words = text.replace("NG追加", "").trim().split(",")
-    db.data.settings.ngWords.push(...words)
     await db.write()
-    return reply(event, "追加完了")
+
+    return client.replyMessage(event.replyToken, {
+      type: "text",
+      text: `⚠️ NG (${userCounts[userId]}/${autoBan})`
+    })
   }
 
-  if (text.startsWith("NG削除") && (isAdmin || isSub)) {
+  // =======================
+  // コマンド
+  // =======================
+
+  if (text === "メニュー") {
+    return client.replyMessage(event.replyToken, {
+      type: "text",
+      text:
+        "【管理】\n通報 / BAN / 緊急オン / 緊急オフ / 設定"
+    })
+  }
+
+  if (text === "設定") {
+    return client.replyMessage(event.replyToken, {
+      type: "text",
+      text:
+        `NG: ${settings.ngWords.join(",")}\nBAN回数:${settings.autoBan}`
+    })
+  }
+
+  if (text.startsWith("NG追加") && isAdmin) {
+    const word = text.replace("NG追加", "").trim()
+    settings.ngWords.push(word)
+    await db.write()
+
+    return client.replyMessage(event.replyToken, {
+      type: "text",
+      text: `追加: ${word}`
+    })
+  }
+
+  if (text.startsWith("NG削除") && isAdmin) {
     const word = text.replace("NG削除", "").trim()
-    db.data.settings.ngWords =
-      db.data.settings.ngWords.filter(w => w !== word)
+    settings.ngWords = settings.ngWords.filter(w => w !== word)
     await db.write()
-    return reply(event, "削除完了")
+
+    return client.replyMessage(event.replyToken, {
+      type: "text",
+      text: `削除: ${word}`
+    })
   }
 
   if (text === "緊急オン" && isAdmin) {
     db.data.emergency = true
     await db.write()
-    return reply(event, "緊急ON")
+
+    return client.replyMessage(event.replyToken, {
+      type: "text",
+      text: "🚨 ON"
+    })
   }
 
   if (text === "緊急オフ" && isAdmin) {
     db.data.emergency = false
     await db.write()
-    return reply(event, "緊急OFF")
-  }
 
-  if (text === "BANモード" && (isAdmin || isSub)) {
-    userState[userId] = "BAN"
-    return reply(event, "ユーザーID送信でBAN")
-  }
-
-  if (userState[userId] === "BAN") {
-    db.data.banList.push(text.trim())
-    userState[userId] = null
-    await db.write()
-    return reply(event, "BAN完了")
+    return client.replyMessage(event.replyToken, {
+      type: "text",
+      text: "✅ OFF"
+    })
   }
 
   if (text === "通報") {
     db.data.reports[userId] = (db.data.reports[userId] || 0) + 1
     await db.write()
-    return reply(event, "通報完了")
+
+    // 📩 管理者通知
+    admins.forEach(id => {
+      client.pushMessage(id, {
+        type: "text",
+        text: `📩 通報\nユーザー: ${userId}`
+      })
+    })
+
+    return client.replyMessage(event.replyToken, {
+      type: "text",
+      text: "通報しました"
+    })
   }
 
-  return reply(event, "コマンド不明")
-}
-
-// ===== UI =====
-function sendMenu(event) {
-  return client.replyMessage(event.replyToken, {
-    type: "flex",
-    altText: "管理パネル",
-    contents: {
-      type: "bubble",
-      body: {
-        type: "box",
-        layout: "vertical",
-        contents: [
-          btn("通報"),
-          btn("BANモード"),
-          btn("緊急オン"),
-          btn("緊急オフ"),
-          btn("設定")
-        ]
-      }
-    }
-  })
-}
-
-function btn(text) {
-  return {
-    type: "button",
-    action: {
-      type: "message",
-      label: text,
-      text: text
-    }
-  }
-}
-
-function reply(event, text) {
   return client.replyMessage(event.replyToken, {
     type: "text",
-    text
+    text: "コマンド不明"
   })
 }
 
