@@ -19,7 +19,6 @@ function initDB() {
     admins: [],
     subAdmins: [],
     globalBan: [],
-    reports: {},
     groups: {}
   }
 }
@@ -44,17 +43,16 @@ function isManager(id, db) {
 function getGroup(db, groupId) {
   if (!db.groups[groupId]) {
     db.groups[groupId] = {
-      ngWords: ["死ね", "荒らし"]
+      ngWords: ["死ね", "荒らし"],
+      emergency: false,
+      welcome: "ようこそ！\nノートのルールを確認して下さい。\n確認しましたら必ずイイねをタップ！"
     }
   }
   return db.groups[groupId]
 }
 
 // ===== 管理登録 =====
-let registerMode = {
-  active: false,
-  expires: 0
-}
+let registerMode = { active: false, expires: 0 }
 
 // ===== 擬似キック =====
 async function pseudoKick(userId, name, to, db) {
@@ -69,48 +67,26 @@ async function pseudoKick(userId, name, to, db) {
   })
 }
 
-// ===== UI =====
-function btn(label, text) {
-  return {
-    type: "button",
-    style: "primary",
-    action: { type: "message", label, text }
-  }
-}
-
-function menuUI() {
-  return {
-    type: "bubble",
-    body: {
-      type: "box",
-      layout: "vertical",
-      spacing: "md",
-      contents: [
-        { type: "text", text: "🛠 管理メニュー", weight: "bold", size: "lg" },
-        {
-          type: "box",
-          layout: "horizontal",
-          contents: [btn("通報", "通報"), btn("設定", "設定")]
-        },
-        {
-          type: "box",
-          layout: "horizontal",
-          contents: [btn("BAN解除", "BAN解除パネル"), btn("管理", "管理UI")]
-        }
-      ]
-    }
-  }
-}
-
 // ===== Webhook =====
 app.post("/webhook", line.middleware(config), async (req, res) => {
   try {
-
     for (const event of req.body.events) {
 
-      if (event.type !== "message" || event.message.type !== "text") continue
-
       const db = loadDB()
+
+      // ===== 参加挨拶 =====
+      if (event.type === "memberJoined") {
+        const groupId = event.source.groupId
+        const group = getGroup(db, groupId)
+
+        await client.pushMessage(groupId, {
+          type: "text",
+          text: group.welcome
+        })
+        continue
+      }
+
+      if (event.type !== "message" || event.message.type !== "text") continue
 
       const text = event.message.text
       const userId = event.source.userId
@@ -118,27 +94,8 @@ app.post("/webhook", line.middleware(config), async (req, res) => {
 
       const group = getGroup(db, to)
 
-      // ===== メニュー最優先（絶対反応） =====
-      if (text === "メニュー") {
-        await client.pushMessage(to, {
-          type: "flex",
-          altText: "メニュー",
-          contents: menuUI()
-        })
-        continue
-      }
-
-      // ===== 名前取得（絶対落ちない） =====
-      let name = "ユーザー"
-      try {
-        if (event.source.type === "group") {
-          const p = await client.getGroupMemberProfile(event.source.groupId, userId)
-          name = p.displayName
-        }
-      } catch {}
-
       // ===== 管理登録 =====
-      if (text === "管理登録") {
+      if (text.includes("管理登録")) {
         registerMode.active = true
         registerMode.expires = Date.now() + 30000
 
@@ -162,6 +119,37 @@ app.post("/webhook", line.middleware(config), async (req, res) => {
         registerMode.active = false
       }
 
+      // ===== 緊急モード =====
+      if (text === "緊急ON" && isManager(userId, db)) {
+        group.emergency = true
+        saveDB(db)
+
+        await client.pushMessage(to, {
+          type: "text",
+          text: "🚨 緊急モードON（管理者以外発言禁止）"
+        })
+        continue
+      }
+
+      if (text === "緊急OFF" && isManager(userId, db)) {
+        group.emergency = false
+        saveDB(db)
+
+        await client.pushMessage(to, {
+          type: "text",
+          text: "✅ 緊急モード解除"
+        })
+        continue
+      }
+
+      if (group.emergency && !isManager(userId, db)) {
+        await client.pushMessage(to, {
+          type: "text",
+          text: "🚫 現在発言できません"
+        })
+        continue
+      }
+
       // ===== BAN =====
       if (db.globalBan.includes(userId)) {
         await client.pushMessage(to, {
@@ -173,68 +161,19 @@ app.post("/webhook", line.middleware(config), async (req, res) => {
 
       // ===== NG =====
       if (group.ngWords.some(w => text.includes(w))) {
-        await pseudoKick(userId, name, to, db)
+        await pseudoKick(userId, "ユーザー", to, db)
         continue
       }
 
-      // ===== 設定 =====
-      if (text === "設定") {
+      // ===== メニュー =====
+      if (text.includes("メニュー")) {
         await client.pushMessage(to, {
           type: "text",
-          text: "設定：NG一覧 / 管理"
+          text: "通報 / 設定 / 緊急ON / 緊急OFF"
         })
         continue
       }
 
-      // ===== NG一覧 =====
-      if (text === "NG一覧") {
-        await client.pushMessage(to, {
-          type: "text",
-          text: group.ngWords.join("\n")
-        })
-        continue
-      }
-
-      // ===== 管理 =====
-      if (text === "管理UI") {
-        if (!isManager(userId, db)) return
-
-        await client.pushMessage(to, {
-          type: "text",
-          text: "管理：副管理追加 / 管理一覧"
-        })
-        continue
-      }
-
-      if (text === "管理一覧") {
-        await client.pushMessage(to, {
-          type: "text",
-          text: db.admins.join("\n")
-        })
-        continue
-      }
-
-      // ===== BAN解除 =====
-      if (text === "BAN解除パネル") {
-        if (!isManager(userId, db)) return
-
-        await client.pushMessage(to, {
-          type: "text",
-          text: db.globalBan.join("\n") || "なし"
-        })
-        continue
-      }
-
-      // ===== 通報 =====
-      if (text === "通報") {
-        await client.pushMessage(to, {
-          type: "text",
-          text: "通報: 通報ID Uxxxx"
-        })
-        continue
-      }
-
-      // ===== デフォルト =====
       await client.pushMessage(to, {
         type: "text",
         text: "OK"
