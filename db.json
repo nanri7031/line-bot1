@@ -1,9 +1,9 @@
 {
   "admins": ["U1a1aca9e44466f8cb05003d7dc86fee0"],
+  "subAdmins": [],
   "globalBan": [],
+  "scores": {},
   "reports": {},
-  "counts": {},
   "spam": {},
-  "logs": [],
-  "groups": {}
+  "recentUsers": {}
 }
