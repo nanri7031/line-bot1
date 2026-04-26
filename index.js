@@ -40,7 +40,9 @@ function getGroup(db, gid) {
       ban: [],
       banNames: {},
       reports: {},
-      ngWords: ["死ね", "荒らし"]
+      ngWords: [],
+      welcome: "ようこそ！",
+      logs: []
     }
   }
 
@@ -63,14 +65,27 @@ let deleteMode = {}
 let banMode = {}
 let reportMode = {}
 let ngAddMode = {}
+let welcomeMode = {}
 
 app.post("/webhook", line.middleware(config), async (req, res) => {
   try {
     for (const event of req.body.events) {
 
-      if (event.type !== "message" || event.message.type !== "text") continue
-
       const db = loadDB()
+
+      // ===== 新規参加 =====
+      if (event.type === "memberJoined") {
+        const gid = event.source.groupId
+        const group = getGroup(db, gid)
+
+        await client.pushMessage(gid, {
+          type: "text",
+          text: group.welcome
+        })
+        continue
+      }
+
+      if (event.type !== "message" || event.message.type !== "text") continue
 
       const text = event.message.text.trim()
       const uid = event.source.userId
@@ -78,7 +93,7 @@ app.post("/webhook", line.middleware(config), async (req, res) => {
 
       const group = getGroup(db, gid)
 
-      // ===== 名前 =====
+      // ===== 名前取得 =====
       let name = "ユーザー"
       try {
         if (event.source.groupId) {
@@ -86,6 +101,23 @@ app.post("/webhook", line.middleware(config), async (req, res) => {
           name = p.displayName
         }
       } catch {}
+
+      // ===== ログ =====
+      function log(action) {
+        group.logs.push(`${name}: ${action}`)
+        if (group.logs.length > 20) group.logs.shift()
+      }
+
+      const isMgr = isManager(uid, group)
+
+      // ===== BAN防御 =====
+      if (!isMgr && group.ban.includes(uid)) {
+        await client.replyMessage(event.replyToken, {
+          type: "text",
+          text: "🚫 BANされています"
+        })
+        continue
+      }
 
       // ===== グループ登録 =====
       if (text === "グループ登録") {
@@ -96,66 +128,183 @@ app.post("/webhook", line.middleware(config), async (req, res) => {
           ban: [],
           banNames: {},
           reports: {},
-          ngWords: []
+          ngWords: [],
+          welcome: "ようこそ！",
+          logs: []
         }
         saveDB(db)
 
         await client.replyMessage(event.replyToken, {
           type: "text",
-          text: "✅ グループ登録完了"
+          text: "グループ登録完了"
         })
         continue
       }
 
-      // ===== BAN =====
-      if (group.ban.includes(uid)) {
+      // ===== 挨拶設定 =====
+      if (text === "挨拶設定" && isMgr) {
+        welcomeMode[gid] = true
         await client.replyMessage(event.replyToken, {
           type: "text",
-          text: "🚫 BANされています"
+          text: "新しい挨拶文を送信"
+        })
+        continue
+      }
+
+      if (welcomeMode[gid]) {
+        group.welcome = text
+        welcomeMode[gid] = false
+        saveDB(db)
+
+        await client.replyMessage(event.replyToken, {
+          type: "text",
+          text: "挨拶更新"
+        })
+        continue
+      }
+
+      if (text === "挨拶確認") {
+        await client.replyMessage(event.replyToken, {
+          type: "text",
+          text: `現在の挨拶👇\n${group.welcome}`
         })
         continue
       }
 
       // ===== BANモード =====
-      if (text === "BANモード" && isManager(uid, group)) {
+      if (text === "BANモード" && isMgr) {
         banMode[gid] = true
-        await client.replyMessage(event.replyToken, { type: "text", text: "次の発言者をBAN" })
+        await client.replyMessage(event.replyToken, { type: "text", text: "次をBAN" })
         continue
       }
 
-      if (banMode[gid] && !isManager(uid, group)) {
+      if (banMode[gid] && !isMgr) {
         group.ban.push(uid)
         group.banNames[uid] = name
+        log("BAN")
         banMode[gid] = false
         saveDB(db)
 
-        await client.replyMessage(event.replyToken, { type: "text", text: `🔨 ${name} BAN` })
+        await client.replyMessage(event.replyToken, {
+          type: "text",
+          text: `${name} BAN`
+        })
         continue
       }
 
       // ===== 通報 =====
-      if (text === "通報" && isManager(uid, group)) {
+      if (text === "通報" && isMgr) {
         reportMode[gid] = true
-        await client.replyMessage(event.replyToken, { type: "text", text: "次の発言者を通報" })
+        await client.replyMessage(event.replyToken, { type: "text", text: "次を通報" })
         continue
       }
 
-      if (reportMode[gid] && !isManager(uid, group)) {
+      if (reportMode[gid] && !isMgr) {
         group.reports[uid] = (group.reports[uid] || 0) + 1
+        log("通報")
         reportMode[gid] = false
         saveDB(db)
 
         await client.replyMessage(event.replyToken, {
           type: "text",
-          text: `通報: ${name} (${group.reports[uid]}回)`
+          text: `${name} 通報 (${group.reports[uid]})`
+        })
+        continue
+      }
+
+      if (text === "通報履歴") {
+        const list = Object.entries(group.reports)
+          .map(([id, c]) => `${group.adminNames[id] || id}：${c}`)
+          .join("\n") || "なし"
+
+        await client.replyMessage(event.replyToken, {
+          type: "text",
+          text: list
+        })
+        continue
+      }
+
+      // ===== NG追加 =====
+      if (text === "NG追加" && isMgr) {
+        ngAddMode[gid] = true
+        await client.replyMessage(event.replyToken, { type: "text", text: "NG送信" })
+        continue
+      }
+
+      if (ngAddMode[gid]) {
+        group.ngWords.push(text)
+        ngAddMode[gid] = false
+        saveDB(db)
+
+        await client.replyMessage(event.replyToken, {
+          type: "text",
+          text: `NG追加:${text}`
+        })
+        continue
+      }
+
+      // ===== NG削除 =====
+      if (text.startsWith("NG削除:")) {
+        const word = text.replace("NG削除:", "")
+        group.ngWords = group.ngWords.filter(w => w !== word)
+        saveDB(db)
+
+        await client.replyMessage(event.replyToken, {
+          type: "text",
+          text: `削除:${word}`
+        })
+        continue
+      }
+
+      // ===== NG一覧 =====
+      if (text === "NG一覧") {
+
+        const contents = group.ngWords.map(word => ({
+          type: "box",
+          layout: "horizontal",
+          contents: [
+            { type: "text", text: word, flex: 5 },
+            {
+              type: "button",
+              style: "secondary",
+              action: {
+                type: "message",
+                label: "削除",
+                text: `NG削除:${word}`
+              }
+            }
+          ]
+        }))
+
+        await client.replyMessage(event.replyToken, {
+          type: "flex",
+          altText: "NG一覧",
+          contents: {
+            type: "bubble",
+            body: { type: "box", layout: "vertical", contents }
+          }
+        })
+        continue
+      }
+
+      // ===== NG検知 =====
+      if (!isMgr && group.ngWords.some(w => text.includes(w))) {
+        group.ban.push(uid)
+        group.banNames[uid] = name
+        log("NG BAN")
+        saveDB(db)
+
+        await client.replyMessage(event.replyToken, {
+          type: "text",
+          text: `${name} NG BAN`
         })
         continue
       }
 
       // ===== 管理登録 =====
-      if (text === "管理登録" && isManager(uid, group)) {
+      if (text === "管理登録" && isMgr) {
         registerMode[gid] = uid
-        await client.replyMessage(event.replyToken, { type: "text", text: "次の発言者を管理者に" })
+        await client.replyMessage(event.replyToken, { type: "text", text: "次を管理者" })
         continue
       }
 
@@ -165,71 +314,25 @@ app.post("/webhook", line.middleware(config), async (req, res) => {
         registerMode[gid] = null
         saveDB(db)
 
-        await client.replyMessage(event.replyToken, { type: "text", text: "管理者登録完了" })
-        continue
-      }
-
-      // ===== 副管理登録 =====
-      if (text === "副管理登録" && isManager(uid, group)) {
-        subRegisterMode[gid] = uid
-        await client.replyMessage(event.replyToken, { type: "text", text: "次の発言者を副管理に" })
-        continue
-      }
-
-      if (subRegisterMode[gid] && uid !== subRegisterMode[gid]) {
-        group.subAdmins.push(uid)
-        group.adminNames[uid] = name
-        subRegisterMode[gid] = null
-        saveDB(db)
-
-        await client.replyMessage(event.replyToken, { type: "text", text: "副管理登録完了" })
-        continue
-      }
-
-      // ===== 管理削除 =====
-      if (text === "管理削除" && isManager(uid, group)) {
-        deleteMode[gid] = true
-        await client.replyMessage(event.replyToken, { type: "text", text: "削除対象が発言してください" })
-        continue
-      }
-
-      if (deleteMode[gid]) {
-        group.admins = group.admins.filter(id => id !== uid)
-        group.subAdmins = group.subAdmins.filter(id => id !== uid)
-        deleteMode[gid] = false
-        saveDB(db)
-
-        await client.replyMessage(event.replyToken, { type: "text", text: "削除完了" })
+        await client.replyMessage(event.replyToken, { type: "text", text: "管理登録完了" })
         continue
       }
 
       // ===== 管理一覧 =====
       if (text === "管理一覧") {
-        const list = Object.entries(group.adminNames)
-          .map(([id, n]) => n)
-          .join("\n") || "なし"
-
-        await client.replyMessage(event.replyToken, {
-          type: "text",
-          text: `👑 管理者一覧\n${list}`
-        })
+        const list = Object.values(group.adminNames).join("\n") || "なし"
+        await client.replyMessage(event.replyToken, { type: "text", text: list })
         continue
       }
 
-      // ===== 通報履歴 =====
-      if (text === "通報履歴") {
-        let list = Object.entries(group.reports)
-          .map(([id, c]) => `${group.adminNames[id] || id}：${c}`)
-          .join("\n") || "なし"
-
-        await client.replyMessage(event.replyToken, {
-          type: "text",
-          text: `📊 通報履歴\n${list}`
-        })
+      // ===== ログ =====
+      if (text === "ログ") {
+        const list = group.logs.join("\n") || "なし"
+        await client.replyMessage(event.replyToken, { type: "text", text: list })
         continue
       }
 
-      // ===== 2列メニュー =====
+      // ===== メニュー（2列） =====
       if (text === "メニュー") {
         await client.replyMessage(event.replyToken, {
           type: "flex",
@@ -246,8 +349,8 @@ app.post("/webhook", line.middleware(config), async (req, res) => {
                   type: "box",
                   layout: "horizontal",
                   contents: [
-                    { type: "button", style: "primary", color: "#1976D2", action: { type: "message", label: "管理登録", text: "管理登録" } },
-                    { type: "button", style: "primary", color: "#1E88E5", action: { type: "message", label: "副管理登録", text: "副管理登録" } }
+                    { type: "button", action: { type: "message", label: "管理登録", text: "管理登録" } },
+                    { type: "button", action: { type: "message", label: "BANモード", text: "BANモード" } }
                   ]
                 },
 
@@ -255,8 +358,8 @@ app.post("/webhook", line.middleware(config), async (req, res) => {
                   type: "box",
                   layout: "horizontal",
                   contents: [
-                    { type: "button", style: "primary", color: "#42A5F5", action: { type: "message", label: "管理一覧", text: "管理一覧" } },
-                    { type: "button", style: "primary", color: "#E53935", action: { type: "message", label: "BANモード", text: "BANモード" } }
+                    { type: "button", action: { type: "message", label: "NG追加", text: "NG追加" } },
+                    { type: "button", action: { type: "message", label: "通報", text: "通報" } }
                   ]
                 },
 
@@ -264,8 +367,8 @@ app.post("/webhook", line.middleware(config), async (req, res) => {
                   type: "box",
                   layout: "horizontal",
                   contents: [
-                    { type: "button", style: "primary", color: "#FB8C00", action: { type: "message", label: "通報", text: "通報" } },
-                    { type: "button", style: "primary", color: "#6A1B9A", action: { type: "message", label: "通報履歴", text: "通報履歴" } }
+                    { type: "button", action: { type: "message", label: "管理一覧", text: "管理一覧" } },
+                    { type: "button", action: { type: "message", label: "挨拶設定", text: "挨拶設定" } }
                   ]
                 },
 
@@ -273,8 +376,8 @@ app.post("/webhook", line.middleware(config), async (req, res) => {
                   type: "box",
                   layout: "horizontal",
                   contents: [
-                    { type: "button", style: "primary", color: "#43A047", action: { type: "message", label: "管理削除", text: "管理削除" } },
-                    { type: "button", style: "primary", color: "#1E88E5", action: { type: "message", label: "グループ登録", text: "グループ登録" } }
+                    { type: "button", action: { type: "message", label: "挨拶確認", text: "挨拶確認" } },
+                    { type: "button", action: { type: "message", label: "ログ", text: "ログ" } }
                   ]
                 }
 
