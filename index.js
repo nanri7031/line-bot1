@@ -1,10 +1,8 @@
 import express from "express"
 import line from "@line/bot-sdk"
 import fs from "fs"
-import fetch from "node-fetch"
 
 const app = express()
-app.use(express.urlencoded({ extended: true }))
 
 const config = {
   channelAccessToken: process.env.CHANNEL_ACCESS_TOKEN,
@@ -12,11 +10,10 @@ const config = {
 }
 
 const client = new line.Client(config)
-const OPENAI_API_KEY = process.env.OPENAI_API_KEY
 
-// ===== DB =====
 const DB_FILE = "./db.json"
 
+// ===== DB =====
 function initDB() {
   return {
     admins: ["U1a1aca9e44466f8cb05003d7dc86fee0"],
@@ -45,7 +42,7 @@ function isManager(id, db) {
   return db.admins.includes(id) || db.subAdmins.includes(id)
 }
 
-// ===== AI荒らし =====
+// ===== NG検知 =====
 function isToxic(text) {
   return /死ね|殺す|バカ+|(.)\1{5,}|https?:\/\//.test(text)
 }
@@ -57,6 +54,7 @@ function addScore(id, db, val) {
 
 // ===== 擬似キック =====
 async function pseudoKick(userId, name, event, db) {
+  if (isManager(userId, db)) return
 
   if (!db.globalBan.includes(userId)) {
     db.globalBan.push(userId)
@@ -64,19 +62,10 @@ async function pseudoKick(userId, name, event, db) {
 
   saveDB(db)
 
-  // グループ通知
   await client.replyMessage(event.replyToken, [
     { type: "text", text: `🔨 ${name} を強制退出しました` },
     { type: "text", text: "🚫 再参加は禁止されています" }
   ])
-
-  // 管理者通知
-  db.admins.forEach(id => {
-    client.pushMessage(id, {
-      type: "text",
-      text: `🔨 擬似キック: ${name}`
-    })
-  })
 }
 
 // ===== 通報UI =====
@@ -118,31 +107,13 @@ function unbanUI(db) {
           type: "button",
           action: {
             type: "message",
-            label: id.slice(0,6),
+            label: id.slice(0, 6),
             text: `UNBAN ${id}`
           }
         }))
       }
     }
   }
-}
-
-// ===== ChatGPT =====
-async function askAI(text) {
-  const res = await fetch("https://api.openai.com/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      "Authorization": `Bearer ${OPENAI_API_KEY}`,
-      "Content-Type": "application/json"
-    },
-    body: JSON.stringify({
-      model: "gpt-4o-mini",
-      messages: [{ role: "user", content: text }]
-    })
-  })
-
-  const data = await res.json()
-  return data.choices[0].message.content
 }
 
 // ===== Webhook =====
@@ -152,7 +123,7 @@ app.post("/webhook", line.middleware(config), async (req, res) => {
 
       const db = loadDB()
 
-      // ===== 参加 =====
+      // ===== 参加検知 =====
       if (event.type === "memberJoined") {
         const userId = event.joined.members[0].userId
 
@@ -171,6 +142,7 @@ app.post("/webhook", line.middleware(config), async (req, res) => {
       const userId = event.source.userId
       const groupId = event.source.groupId || "private"
 
+      // ===== 名前取得 =====
       let name = "ユーザー"
       try {
         const p = await client.getGroupMemberProfile(groupId, userId)
@@ -182,7 +154,7 @@ app.post("/webhook", line.middleware(config), async (req, res) => {
       db.recentUsers[groupId].push({ id: userId, name })
       db.recentUsers[groupId] = db.recentUsers[groupId].slice(-5)
 
-      // ===== BAN =====
+      // ===== BANチェック =====
       if (db.globalBan.includes(userId)) {
         await client.replyMessage(event.replyToken, {
           type: "text",
@@ -191,7 +163,7 @@ app.post("/webhook", line.middleware(config), async (req, res) => {
         continue
       }
 
-      // ===== AI荒らし =====
+      // ===== NGワード =====
       if (isToxic(text)) {
         addScore(userId, db, -5)
       }
@@ -213,19 +185,26 @@ app.post("/webhook", line.middleware(config), async (req, res) => {
         continue
       }
 
-      // ===== 通報 =====
+      // ===== 通報UI =====
       if (text === "通報") {
         await client.replyMessage(event.replyToken, reportUI(db, groupId))
         continue
       }
 
+      // ===== 通報処理 =====
       if (text.startsWith("通報ID ")) {
         const target = text.split(" ")[1]
 
         db.reports[target] = (db.reports[target] || 0) + 1
 
         if (db.reports[target] >= 3) {
-          await pseudoKick(target, "対象ユーザー", event, db)
+          db.globalBan.push(target)
+          saveDB(db)
+
+          await client.replyMessage(event.replyToken, {
+            type: "text",
+            text: "🚫 通報BAN"
+          })
           continue
         }
 
@@ -257,21 +236,20 @@ app.post("/webhook", line.middleware(config), async (req, res) => {
         continue
       }
 
-      // ===== メンションAI =====
+      // ===== メンション簡易返信 =====
       const isMentioned =
         event.message.mention &&
         event.message.mention.mentionees?.some(m => m.isSelf)
 
       if (isMentioned) {
-        const reply = await askAI(text)
         await client.replyMessage(event.replyToken, {
           type: "text",
-          text: reply.slice(0, 1000)
+          text: "呼びました？"
         })
         continue
       }
 
-      // ===== 通常 =====
+      // ===== 通常返信 =====
       await client.replyMessage(event.replyToken, {
         type: "text",
         text: "OK"
@@ -288,25 +266,3 @@ app.post("/webhook", line.middleware(config), async (req, res) => {
 })
 
 app.listen(process.env.PORT || 3000)
-
-// ===== Web管理 =====
-app.get("/admin", (req, res) => {
-  const db = loadDB()
-
-  res.send(`
-    <h1>管理</h1>
-    ${db.globalBan.map(id => `
-      <div>${id} <a href="/unban/${id}">解除</a></div>
-    `).join("")}
-  `)
-})
-
-app.get("/unban/:id", (req, res) => {
-  const db = loadDB()
-  const id = req.params.id
-
-  db.globalBan = db.globalBan.filter(u => u !== id)
-  saveDB(db)
-
-  res.send("解除完了")
-})
