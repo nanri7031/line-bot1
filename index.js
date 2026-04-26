@@ -1,295 +1,73 @@
-import express from "express"
-import line from "@line/bot-sdk"
-import fs from "fs"
+// ===== 必要パッケージ =====
+// npm install express @line/bot-sdk
 
-const app = express()
+const express = require("express");
+const line = require("@line/bot-sdk");
 
-const OWNER_ID = "U1a1aca9e44466f8cb05003d7dc86fee0"
+const app = express();
 
+// ===== LINE設定 =====
 const config = {
-  channelAccessToken: process.env.CHANNEL_ACCESS_TOKEN,
-  channelSecret: process.env.CHANNEL_SECRET
-}
+  channelAccessToken: "ここにあなたの長期アクセストークン",
+  channelSecret: "ここにチャネルシークレット"
+};
 
-const client = new line.Client(config)
-const DB_FILE = "./db.json"
+const client = new line.Client(config);
 
-// ===== DB =====
-function loadDB() {
-  if (!fs.existsSync(DB_FILE)) {
-    fs.writeFileSync(DB_FILE, JSON.stringify({ groups: {} }, null, 2))
-  }
-  return JSON.parse(fs.readFileSync(DB_FILE))
-}
+// ===== ミドルウェア =====
+app.use("/webhook", line.middleware(config));
 
-function saveDB(db) {
-  fs.writeFileSync(DB_FILE, JSON.stringify(db, null, 2))
-}
-
-// ===== グループ =====
-function getGroup(db, gid) {
-  if (!db.groups[gid]) {
-    db.groups[gid] = {
-      admins: [OWNER_ID],
-      subAdmins: [],
-      adminNames: {},
-      ban: [],
-      banNames: {},
-      reports: {},
-      ngWords: [],
-      welcome: "ようこそ！",
-      logs: []
-    }
-  }
-
-  if (!db.groups[gid].admins.includes(OWNER_ID)) {
-    db.groups[gid].admins.push(OWNER_ID)
-  }
-
-  return db.groups[gid]
-}
-
-function isManager(uid, group) {
-  return group.admins.includes(uid) || group.subAdmins.includes(uid)
-}
-
-// ===== 状態 =====
-let ngAddMode = {}
-let welcomeMode = {}
-
-app.post("/webhook", line.middleware(config), async (req, res) => {
+// ===== メイン処理 =====
+app.post("/webhook", async (req, res) => {
   try {
-    for (const event of req.body.events) {
+    const events = req.body.events || [];
 
-      const db = loadDB()
+    await Promise.all(events.map(async (event) => {
 
-      // ===== 新規参加 =====
-      if (event.type === "memberJoined") {
-        const gid = event.source.groupId
-        const group = getGroup(db, gid)
-
-        await client.pushMessage(gid, {
+      // テキストメッセージ
+      if (event.type === "message" && event.message.type === "text") {
+        return client.replyMessage(event.replyToken, {
           type: "text",
-          text: group.welcome
-        })
-        continue
+          text: "受信：" + event.message.text
+        });
       }
 
-      if (event.type !== "message" || event.message.type !== "text") continue
-
-      const text = event.message.text.trim()
-      const uid = event.source.userId
-      const gid = event.source.groupId || uid
-
-      const group = getGroup(db, gid)
-
-      // ===== 名前取得 =====
-      let name = "ユーザー"
-      try {
-        if (event.source.groupId) {
-          const p = await client.getGroupMemberProfile(gid, uid)
-          name = p.displayName
-        }
-      } catch {}
-
-      const isMgr = isManager(uid, group)
-
-      // ===== BAN防御 =====
-      if (!isMgr && group.ban.includes(uid)) {
-        await client.replyMessage(event.replyToken, {
+      // スタンプ・画像など全部に最低限反応させる
+      if (event.type === "message") {
+        return client.replyMessage(event.replyToken, {
           type: "text",
-          text: "🚫 BANされています"
-        })
-        continue
+          text: "メッセージ受信"
+        });
       }
 
-      // ===== メンションBAN =====
-      if (text.includes("BAN")) {
-        const mentions = event.message.mention?.mentionees
-
-        if (mentions && isMgr) {
-          const targetId = mentions[0].userId
-
-          if (isManager(targetId, group)) {
-            await client.replyMessage(event.replyToken, {
-              type: "text",
-              text: "管理者対象外"
-            })
-            continue
-          }
-
-          group.ban.push(targetId)
-          saveDB(db)
-
-          await client.replyMessage(event.replyToken, {
-            type: "text",
-            text: "BAN完了"
-          })
-          continue
-        }
-      }
-
-      // ===== メンションキック =====
-      if (text.includes("キック")) {
-        const mentions = event.message.mention?.mentionees
-
-        if (mentions && isMgr) {
-          await client.replyMessage(event.replyToken, {
-            type: "text",
-            text: "対象ユーザーは退出してください"
-          })
-          continue
-        }
-      }
-
-      // ===== 通報 =====
-      if (text === "通報" && isMgr) {
-        group.reportMode = true
-        await client.replyMessage(event.replyToken, {
+      // 参加時（グループなど）
+      if (event.type === "join") {
+        return client.replyMessage(event.replyToken, {
           type: "text",
-          text: "次の発言者を通報"
-        })
-        continue
+          text: "参加しました"
+        });
       }
 
-      if (group.reportMode && !isMgr) {
-        group.reports[uid] = (group.reports[uid] || 0) + 1
-        group.reportMode = false
-
-        // ===== 自動キック（2回） =====
-        if (group.reports[uid] === 2) {
-          await client.replyMessage(event.replyToken, {
-            type: "text",
-            text: `⚠️ ${name} は退出推奨`
-          })
-        }
-
-        // ===== 自動BAN（3回） =====
-        if (group.reports[uid] >= 3) {
-          group.ban.push(uid)
-          await client.replyMessage(event.replyToken, {
-            type: "text",
-            text: `🚫 ${name} は通報累計でBAN`
-          })
-        }
-
-        saveDB(db)
-        continue
-      }
-
-      // ===== NG追加 =====
-      if (text === "NG追加" && isMgr) {
-        ngAddMode[gid] = true
-        await client.replyMessage(event.replyToken, {
+      // フォロー時
+      if (event.type === "follow") {
+        return client.replyMessage(event.replyToken, {
           type: "text",
-          text: "NGワード送信"
-        })
-        continue
+          text: "友達追加ありがとう"
+        });
       }
 
-      if (ngAddMode[gid]) {
-        group.ngWords.push(text)
-        ngAddMode[gid] = false
-        saveDB(db)
+    }));
 
-        await client.replyMessage(event.replyToken, {
-          type: "text",
-          text: "追加完了"
-        })
-        continue
-      }
+    res.status(200).end();
 
-      // ===== NG検知 =====
-      if (!isMgr && group.ngWords.some(w => text.includes(w))) {
-        group.ban.push(uid)
-        saveDB(db)
-
-        await client.replyMessage(event.replyToken, {
-          type: "text",
-          text: "NG BAN"
-        })
-        continue
-      }
-
-      // ===== 挨拶 =====
-      if (text === "挨拶設定" && isMgr) {
-        welcomeMode[gid] = true
-        await client.replyMessage(event.replyToken, {
-          type: "text",
-          text: "挨拶文送信"
-        })
-        continue
-      }
-
-      if (welcomeMode[gid]) {
-        group.welcome = text
-        welcomeMode[gid] = false
-        saveDB(db)
-
-        await client.replyMessage(event.replyToken, {
-          type: "text",
-          text: "更新完了"
-        })
-        continue
-      }
-
-      if (text === "挨拶確認") {
-        await client.replyMessage(event.replyToken, {
-          type: "text",
-          text: group.welcome
-        })
-        continue
-      }
-
-      // ===== メニュー =====
-      if (text === "メニュー") {
-        await client.replyMessage(event.replyToken, {
-          type: "flex",
-          altText: "管理メニュー",
-          contents: {
-            type: "bubble",
-            header: {
-              type: "box",
-              layout: "vertical",
-              contents: [
-                { type: "text", text: "🛠 管理メニュー", color: "#fff", align: "center" }
-              ],
-              backgroundColor: "#1565C0"
-            },
-            body: {
-              type: "box",
-              layout: "vertical",
-              spacing: "md",
-              contents: [
-
-                { type: "box", layout: "horizontal", contents: [
-                  { type: "button", action: { type: "message", label: "NG追加", text: "NG追加" } },
-                  { type: "button", action: { type: "message", label: "通報", text: "通報" } }
-                ]},
-
-                { type: "box", layout: "horizontal", contents: [
-                  { type: "button", action: { type: "message", label: "挨拶設定", text: "挨拶設定" } },
-                  { type: "button", action: { type: "message", label: "挨拶確認", text: "挨拶確認" } }
-                ]}
-
-              ]
-            }
-          }
-        })
-        continue
-      }
-
-      await client.replyMessage(event.replyToken, {
-        type: "text",
-        text: "OK"
-      })
-    }
-
-    res.sendStatus(200)
-  } catch (e) {
-    console.log(e)
-    res.sendStatus(500)
+  } catch (err) {
+    console.error("エラー:", err);
+    res.status(500).end();
   }
-})
+});
 
-app.listen(process.env.PORT || 3000)
+// ===== サーバー起動 =====
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => {
+  console.log("起動ポート:", PORT);
+});
