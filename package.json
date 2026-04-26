@@ -1,14 +1,10 @@
 {
   "name": "line-bot",
   "version": "1.0.0",
-  "description": "LINE監視BOT 完全安定版",
   "type": "module",
   "main": "index.js",
   "scripts": {
     "start": "node index.js"
-  },
-  "engines": {
-    "node": ">=18"
   },
   "dependencies": {
     "@line/bot-sdk": "^7.5.0",
