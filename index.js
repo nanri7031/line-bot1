@@ -1,14 +1,30 @@
 import express from "express"
+import line from "@line/bot-sdk"
 
 const app = express()
 
-app.use(express.json())
+const config = {
+  channelAccessToken: process.env.CHANNEL_ACCESS_TOKEN,
+  channelSecret: process.env.CHANNEL_SECRET
+}
 
-app.post("/webhook", (req, res) => {
-  console.log("受信OK")
-  res.sendStatus(200)
+const client = new line.Client(config)
+
+app.post("/webhook", line.middleware(config), async (req, res) => {
+  try {
+    for (const event of req.body.events) {
+      if (event.type === "message") {
+        await client.replyMessage(event.replyToken, {
+          type: "text",
+          text: "OK動作中"
+        })
+      }
+    }
+    res.sendStatus(200)
+  } catch (err) {
+    console.log(err)
+    res.sendStatus(500)
+  }
 })
 
-app.listen(process.env.PORT || 3000, () => {
-  console.log("起動OK")
-})
+app.listen(process.env.PORT || 3000)
