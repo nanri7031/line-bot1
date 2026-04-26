@@ -17,7 +17,6 @@ const DB_FILE = "./db.json"
 function initDB() {
   return {
     admins: [],
-    globalBan: [],
     groups: {}
   }
 }
@@ -33,7 +32,7 @@ function saveDB(db) {
   fs.writeFileSync(DB_FILE, JSON.stringify(db, null, 2))
 }
 
-function isManager(id, db) {
+function isAdmin(id, db) {
   return db.admins.includes(id)
 }
 
@@ -47,21 +46,19 @@ function getGroup(db, id) {
   return db.groups[id]
 }
 
+// ===== 管理登録 =====
 let registerMode = { active: false, expires: 0 }
 
 // ===== Webhook =====
 app.post("/webhook", line.middleware(config), async (req, res) => {
   try {
-    console.log("イベント受信:", JSON.stringify(req.body))
 
     for (const event of req.body.events) {
 
       const db = loadDB()
 
-      // ===== 参加 =====
+      // ===== 参加挨拶 =====
       if (event.type === "memberJoined") {
-        console.log("参加検知")
-
         const groupId = event.source.groupId
         const group = getGroup(db, groupId)
 
@@ -77,94 +74,88 @@ app.post("/webhook", line.middleware(config), async (req, res) => {
 
       const text = event.message.text.trim()
       const userId = event.source.userId
-      const to = event.source.groupId || userId
-
-      console.log("受信テキスト:", text)
+      const groupId = event.source.groupId
+      const to = groupId || userId
 
       const group = getGroup(db, to)
 
       // ===== 管理登録 =====
-      if (text.includes("管理登録")) {
-        console.log("管理登録トリガー")
-
+      if (text === "管理登録") {
         registerMode.active = true
         registerMode.expires = Date.now() + 30000
 
-        await client.pushMessage(to, {
+        await client.replyMessage(event.replyToken, {
           type: "text",
           text: "30秒以内に発言で管理者登録"
         })
-        continue
+        return
       }
 
       if (registerMode.active && Date.now() < registerMode.expires) {
-        console.log("管理者登録実行")
-
         if (!db.admins.includes(userId)) {
           db.admins.push(userId)
           saveDB(db)
 
-          await client.pushMessage(to, {
+          await client.replyMessage(event.replyToken, {
             type: "text",
             text: "👑 管理者登録完了"
           })
         }
-
         registerMode.active = false
+        return
       }
 
-      // ===== 緊急 =====
-      if (text === "緊急ON" && isManager(userId, db)) {
+      // ===== 緊急モード =====
+      if (text === "緊急ON" && isAdmin(userId, db)) {
         group.emergency = true
         saveDB(db)
 
-        await client.pushMessage(to, {
+        await client.replyMessage(event.replyToken, {
           type: "text",
-          text: "🚨 緊急ON"
+          text: "🚨 緊急モードON"
         })
-        continue
+        return
       }
 
-      if (text === "緊急OFF" && isManager(userId, db)) {
+      if (text === "緊急OFF" && isAdmin(userId, db)) {
         group.emergency = false
         saveDB(db)
 
-        await client.pushMessage(to, {
+        await client.replyMessage(event.replyToken, {
           type: "text",
-          text: "解除"
+          text: "✅ 緊急モード解除"
         })
-        continue
+        return
       }
 
-      if (group.emergency && !isManager(userId, db)) {
-        await client.pushMessage(to, {
+      if (group.emergency && !isAdmin(userId, db)) {
+        await client.replyMessage(event.replyToken, {
           type: "text",
-          text: "🚫 発言禁止中"
+          text: "🚫 現在発言できません"
         })
-        continue
+        return
       }
 
       // ===== メニュー =====
       if (text.includes("メニュー")) {
-        console.log("メニュー反応")
-
-        await client.pushMessage(to, {
+        await client.replyMessage(event.replyToken, {
           type: "text",
-          text: "メニュー動作OK"
+          text: "📋 管理メニュー\n・管理登録\n・緊急ON\n・緊急OFF"
         })
-        continue
+        return
       }
 
       // ===== デフォルト =====
-      await client.pushMessage(to, {
+      await client.replyMessage(event.replyToken, {
         type: "text",
         text: "受信OK"
       })
     }
 
     res.sendStatus(200)
-  } catch (e) {
-    console.log("エラー:", e)
+
+  } catch (err) {
+    console.log(err)
     res.sendStatus(500)
   }
 })
