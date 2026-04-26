@@ -20,7 +20,6 @@ function initDB() {
     subAdmins: [],
     globalBan: [],
     reports: {},
-    recentUsers: {},
     groups: {}
   }
 }
@@ -51,7 +50,7 @@ function getGroup(db, groupId) {
   return db.groups[groupId]
 }
 
-// ===== 管理登録モード =====
+// ===== 管理登録 =====
 let registerMode = {
   active: false,
   expires: 0
@@ -61,10 +60,7 @@ let registerMode = {
 async function pseudoKick(userId, name, to, db) {
   if (isManager(userId, db)) return
 
-  if (!db.globalBan.includes(userId)) {
-    db.globalBan.push(userId)
-  }
-
+  db.globalBan.push(userId)
   saveDB(db)
 
   await client.pushMessage(to, {
@@ -106,39 +102,10 @@ function menuUI() {
   }
 }
 
-function settingUI() {
-  return {
-    type: "bubble",
-    body: {
-      type: "box",
-      layout: "vertical",
-      contents: [
-        { type: "text", text: "⚙️ 設定", weight: "bold" },
-        btn("NG一覧", "NG一覧"),
-        btn("管理", "管理UI")
-      ]
-    }
-  }
-}
-
-function adminUI() {
-  return {
-    type: "bubble",
-    body: {
-      type: "box",
-      layout: "vertical",
-      contents: [
-        { type: "text", text: "👑 管理", weight: "bold" },
-        btn("副管理追加", "副管理追加"),
-        btn("管理一覧", "管理一覧")
-      ]
-    }
-  }
-}
-
 // ===== Webhook =====
 app.post("/webhook", line.middleware(config), async (req, res) => {
   try {
+
     for (const event of req.body.events) {
 
       if (event.type !== "message" || event.message.type !== "text") continue
@@ -147,16 +114,25 @@ app.post("/webhook", line.middleware(config), async (req, res) => {
 
       const text = event.message.text
       const userId = event.source.userId
-
-      // 🔥 push先統一
-      const to = event.source.groupId || event.source.userId
+      const to = event.source.groupId || userId
 
       const group = getGroup(db, to)
 
+      // ===== メニュー最優先（絶対反応） =====
+      if (text === "メニュー") {
+        await client.pushMessage(to, {
+          type: "flex",
+          altText: "メニュー",
+          contents: menuUI()
+        })
+        continue
+      }
+
+      // ===== 名前取得（絶対落ちない） =====
       let name = "ユーザー"
       try {
-        if (event.source.groupId) {
-          const p = await client.getGroupMemberProfile(to, userId)
+        if (event.source.type === "group") {
+          const p = await client.getGroupMemberProfile(event.source.groupId, userId)
           name = p.displayName
         }
       } catch {}
@@ -201,24 +177,11 @@ app.post("/webhook", line.middleware(config), async (req, res) => {
         continue
       }
 
-      // ===== メニュー =====
-      if (text === "メニュー") {
-        console.log("メニュー受信")
-
-        await client.pushMessage(to, {
-          type: "flex",
-          altText: "メニュー",
-          contents: menuUI()
-        })
-        continue
-      }
-
       // ===== 設定 =====
       if (text === "設定") {
         await client.pushMessage(to, {
-          type: "flex",
-          altText: "設定",
-          contents: settingUI()
+          type: "text",
+          text: "設定：NG一覧 / 管理"
         })
         continue
       }
@@ -237,9 +200,8 @@ app.post("/webhook", line.middleware(config), async (req, res) => {
         if (!isManager(userId, db)) return
 
         await client.pushMessage(to, {
-          type: "flex",
-          altText: "管理",
-          contents: adminUI()
+          type: "text",
+          text: "管理：副管理追加 / 管理一覧"
         })
         continue
       }
@@ -247,9 +209,7 @@ app.post("/webhook", line.middleware(config), async (req, res) => {
       if (text === "管理一覧") {
         await client.pushMessage(to, {
           type: "text",
-          text:
-            "管理者\n" + db.admins.join("\n") +
-            "\n副管理\n" + db.subAdmins.join("\n")
+          text: db.admins.join("\n")
         })
         continue
       }
@@ -270,29 +230,6 @@ app.post("/webhook", line.middleware(config), async (req, res) => {
         await client.pushMessage(to, {
           type: "text",
           text: "通報: 通報ID Uxxxx"
-        })
-        continue
-      }
-
-      if (text.startsWith("通報ID ")) {
-        const target = text.split(" ")[1]
-
-        db.reports[target] = (db.reports[target] || 0) + 1
-
-        if (db.reports[target] >= 3) {
-          db.globalBan.push(target)
-          saveDB(db)
-
-          await client.pushMessage(to, {
-            type: "text",
-            text: "🚫 通報BAN"
-          })
-          continue
-        }
-
-        await client.pushMessage(to, {
-          type: "text",
-          text: "通報完了"
         })
         continue
       }
