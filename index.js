@@ -5,285 +5,212 @@ import { Low } from "lowdb"
 import { JSONFile } from "lowdb/node"
 
 dotenv.config()
+
 const app = express()
 
-// =====================
-// LINE設定
-// =====================
 const config = {
   channelAccessToken: process.env.CHANNEL_ACCESS_TOKEN,
   channelSecret: process.env.CHANNEL_SECRET
 }
+
 const client = new line.Client(config)
 
-// =====================
-// DB
-// =====================
+// DB設定
 const adapter = new JSONFile("db.json")
+const db = new Low(adapter)
 
-const defaultData = {
+await db.read()
+
+db.data ||= {
   admins: ["U1a1aca9e44466f8cb05003d7dc86fee0"],
   subAdmins: [],
   banList: [],
   reports: {},
   userCounts: {},
   emergency: false,
-  logs: [],
-  groups: {}, // ← グループ別設定
   settings: {
     autoBan: 3,
     ngWords: ["死ね", "荒らし"]
   }
 }
 
-const db = new Low(adapter, defaultData)
-await db.read()
 await db.write()
 
-// =====================
 // Webhook
-// =====================
 app.post("/webhook", line.middleware(config), async (req, res) => {
-  await Promise.all(req.body.events.map(handleEvent))
-  res.sendStatus(200)
+  try {
+    await Promise.all(req.body.events.map(handleEvent))
+    res.sendStatus(200)
+  } catch (err) {
+    console.error(err)
+    res.sendStatus(500)
+  }
 })
 
-// =====================
-// 管理画面
-// =====================
-app.get("/", async (req, res) => {
-  await db.read()
+// メイン処理
+async function handleEvent(event) {
+  try {
+    if (event.type !== "message") return Promise.resolve(null)
+    if (event.message.type !== "text") return Promise.resolve(null)
 
-  res.send(`
-    <h1>BOT管理</h1>
-    <p>緊急: ${db.data.emergency}</p>
+    const text = event.message.text
+    const userId = event.source.userId || null
+    const groupId = event.source.groupId || "default"
 
-    <h2>グループ設定</h2>
-    <pre>${JSON.stringify(db.data.groups, null, 2)}</pre>
+    if (!userId) return
 
-    <h2>NG</h2>
-    <pre>${db.data.settings.ngWords.join(", ")}</pre>
-  `)
-})
+    // DB初期化（グループ別）
+    if (!db.data.groups) db.data.groups = {}
 
-// =====================
-// UIメニュー
-// =====================
-function menuFlex() {
-  return {
-    type: "flex",
-    altText: "管理メニュー",
-    contents: {
-      type: "bubble",
-      body: {
-        type: "box",
-        layout: "vertical",
-        contents: [
-          { type: "text", text: "管理パネル", weight: "bold", size: "xl" },
-          btn("通報"),
-          btn("設定"),
-          btn("緊急オン"),
-          btn("緊急オフ")
-        ]
+    if (!db.data.groups[groupId]) {
+      db.data.groups[groupId] = {
+        ngWords: [...db.data.settings.ngWords],
+        counts: {}
       }
     }
-  }
-}
 
-function btn(label) {
-  return {
-    type: "button",
-    action: {
-      type: "message",
-      label: label,
-      text: label
-    }
-  }
-}
+    const group = db.data.groups[groupId]
 
-// =====================
-// メイン処理
-// =====================
-async function handleEvent(event) {
-
-  await db.read()
-
-  const groupId = event.source.groupId
-  const userId = event.source.userId
-
-  // =====================
-  // 👤 ユーザー名取得
-  // =====================
-  let userName = "Unknown"
-  try {
-    if (groupId) {
-      const profile = await client.getGroupMemberProfile(groupId, userId)
-      userName = profile.displayName
-    } else {
+    // プロフィール取得
+    let userName = "不明"
+    try {
       const profile = await client.getProfile(userId)
       userName = profile.displayName
+    } catch {}
+
+    // 権限
+    const isAdmin = db.data.admins.includes(userId)
+    const isSub = db.data.subAdmins.includes(userId)
+
+    // ===== メニュー =====
+    if (text === "メニュー") {
+      return reply(event.replyToken, {
+        type: "template",
+        altText: "管理メニュー",
+        template: {
+          type: "buttons",
+          title: "管理パネル",
+          text: "操作を選択",
+          actions: [
+            { type: "message", label: "⚙ 設定", text: "設定" },
+            { type: "message", label: "🚨 緊急ON", text: "緊急ON" },
+            { type: "message", label: "🟢 緊急OFF", text: "緊急OFF" },
+            { type: "message", label: "📩 通報一覧", text: "通報一覧" }
+          ]
+        }
+      })
     }
-  } catch (e) {}
 
-  // =====================
-  // 👣 参加・退出
-  // =====================
-  if (event.type === "memberJoined") {
-    return client.replyMessage(event.replyToken, {
-      type: "text",
-      text: `👣 ${userName} が参加`
-    })
-  }
-
-  if (event.type === "memberLeft") {
-    return
-  }
-
-  if (event.type !== "message") return
-  if (event.message.type !== "text") return
-
-  const text = event.message.text
-
-  // =====================
-  // 📂 グループ設定初期化
-  // =====================
-  if (groupId && !db.data.groups[groupId]) {
-    db.data.groups[groupId] = {
-      ngWords: [...db.data.settings.ngWords],
-      autoBan: db.data.settings.autoBan
+    // ===== 設定 =====
+    if (text === "設定") {
+      return reply(event.replyToken, {
+        type: "text",
+        text:
+          `【設定】\n` +
+          `自動BAN: ${db.data.settings.autoBan}\n` +
+          `NGワード: ${group.ngWords.join(", ")}`
+      })
     }
-    await db.write()
-  }
 
-  const groupSetting = groupId
-    ? db.data.groups[groupId]
-    : db.data.settings
-
-  const { ngWords, autoBan } = groupSetting
-
-  const { admins, subAdmins, banList, userCounts, emergency } = db.data
-
-  const isAdmin = admins.includes(userId)
-  const isSubAdmin = subAdmins.includes(userId)
-
-  // BAN
-  if (banList.includes(userId)) {
-    return client.replyMessage(event.replyToken, {
-      type: "text",
-      text: "🚫 BAN済み"
-    })
-  }
-
-  // 緊急
-  if (emergency && !isAdmin && !isSubAdmin) {
-    return client.replyMessage(event.replyToken, {
-      type: "text",
-      text: "🚨 緊急モード中"
-    })
-  }
-
-  // =====================
-  // 🔥 NG検知
-  // =====================
-  const isNG = ngWords.some(w => text.includes(w))
-
-  if (isNG && !isAdmin && !isSubAdmin) {
-
-    userCounts[userId] = (userCounts[userId] || 0) + 1
-
-    if (userCounts[userId] >= autoBan) {
-      banList.push(userId)
+    // ===== NG追加 =====
+    if (text.startsWith("NG追加") && (isAdmin || isSub)) {
+      const words = text.replace("NG追加", "").trim().split(/[,、]/)
+      group.ngWords.push(...words)
       await db.write()
 
-      for (const id of admins) {
-        await client.pushMessage(id, {
+      return reply(event.replyToken, {
+        type: "text",
+        text: `追加: ${words.join(", ")}`
+      })
+    }
+
+    // ===== NG削除 =====
+    if (text.startsWith("NG削除") && (isAdmin || isSub)) {
+      const words = text.replace("NG削除", "").trim().split(/[,、]/)
+      group.ngWords = group.ngWords.filter(w => !words.includes(w))
+      await db.write()
+
+      return reply(event.replyToken, {
+        type: "text",
+        text: `削除: ${words.join(", ")}`
+      })
+    }
+
+    // ===== 緊急 =====
+    if (text === "緊急ON" && isAdmin) {
+      db.data.emergency = true
+      await db.write()
+      return reply(event.replyToken, { type: "text", text: "🚨 緊急モードON" })
+    }
+
+    if (text === "緊急OFF" && isAdmin) {
+      db.data.emergency = false
+      await db.write()
+      return reply(event.replyToken, { type: "text", text: "🟢 緊急モードOFF" })
+    }
+
+    // ===== 緊急時制限 =====
+    if (db.data.emergency && !isAdmin) {
+      return reply(event.replyToken, {
+        type: "text",
+        text: "🚫 現在制限中"
+      })
+    }
+
+    // ===== NGチェック =====
+    if (group.ngWords.some(w => text.includes(w))) {
+      group.counts[userId] = (group.counts[userId] || 0) + 1
+
+      await db.write()
+
+      if (group.counts[userId] >= db.data.settings.autoBan) {
+        db.data.banList.push(userId)
+        await db.write()
+
+        return reply(event.replyToken, {
           type: "text",
-          text: `🚫 BAN\n${userName} (${userId})`
+          text: `🚫 BAN: ${userName}`
         })
       }
 
-      return client.replyMessage(event.replyToken, {
+      return reply(event.replyToken, {
         type: "text",
-        text: `🚫 ${userName} をBAN`
+        text: `⚠️ ${userName} NG (${group.counts[userId]})`
       })
     }
 
-    await db.write()
+    // ===== 通報 =====
+    if (text === "通報") {
+      db.data.reports[userId] = (db.data.reports[userId] || 0) + 1
+      await db.write()
 
-    return client.replyMessage(event.replyToken, {
-      type: "text",
-      text: `⚠️ ${userName} NG (${userCounts[userId]}/${autoBan})`
-    })
-  }
-
-  // =====================
-  // UI
-  // =====================
-  if (text === "メニュー") {
-    return client.replyMessage(event.replyToken, menuFlex())
-  }
-
-  if (text === "設定") {
-    return client.replyMessage(event.replyToken, {
-      type: "text",
-      text: `NG: ${ngWords.join(",")}\n回数:${autoBan}`
-    })
-  }
-
-  if (text === "緊急オン" && isAdmin) {
-    db.data.emergency = true
-    await db.write()
-    return client.replyMessage(event.replyToken, { type: "text", text: "ON" })
-  }
-
-  if (text === "緊急オフ" && isAdmin) {
-    db.data.emergency = false
-    await db.write()
-    return client.replyMessage(event.replyToken, { type: "text", text: "OFF" })
-  }
-
-  // =====================
-  // グループ別 NG追加
-  // =====================
-  if (text.startsWith("NG追加") && isAdmin) {
-    const word = text.replace("NG追加", "").trim()
-
-    if (groupId) {
-      db.data.groups[groupId].ngWords.push(word)
-    } else {
-      db.data.settings.ngWords.push(word)
-    }
-
-    await db.write()
-
-    return client.replyMessage(event.replyToken, {
-      type: "text",
-      text: `追加: ${word}`
-    })
-  }
-
-  // 通報
-  if (text === "通報") {
-    db.data.reports[userId] = (db.data.reports[userId] || 0) + 1
-    await db.write()
-
-    for (const id of admins) {
-      await client.pushMessage(id, {
+      return reply(event.replyToken, {
         type: "text",
-        text: `📩 通報\n${userName}`
+        text: "通報受付"
       })
     }
 
-    return client.replyMessage(event.replyToken, {
+    // ===== デフォルト =====
+    return reply(event.replyToken, {
       type: "text",
-      text: "通報しました"
+      text: "コマンド不明"
     })
-  }
 
-  return client.replyMessage(event.replyToken, {
-    type: "text",
-    text: "コマンド不明"
-  })
+  } catch (err) {
+    console.error("EVENT ERROR:", err)
+    return Promise.resolve(null)
+  }
 }
 
-app.listen(process.env.PORT || 3000)
+// 安全reply
+async function reply(token, message) {
+  try {
+    return await client.replyMessage(token, message)
+  } catch (e) {
+    console.log("reply error", e)
+  }
+}
+
+// サーバー起動
+const PORT = process.env.PORT || 3000
+app.listen(PORT, () => console.log("Server running"))
