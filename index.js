@@ -49,48 +49,12 @@ function saveDB(db) {
   fs.writeFileSync(DB_FILE, JSON.stringify(db, null, 2))
 }
 
-// ===== 管理画面 =====
-app.get("/", (req, res) => {
-  const db = loadDB()
-
-  res.send(`
-    <h1>BOT管理</h1>
-
-    <h2>緊急モード: ${db.emergency}</h2>
-    <form method="POST" action="/toggle">
-      <button name="mode" value="on">ON</button>
-      <button name="mode" value="off">OFF</button>
-    </form>
-
-    <h2>NGワード</h2>
-    <pre>${db.settings.ngWords.join(", ")}</pre>
-
-    <form method="POST" action="/add">
-      <input name="word" placeholder="追加"/>
-      <button>追加</button>
-    </form>
-
-    <h2>BAN</h2>
-    <pre>${db.banList.join("<br>")}</pre>
-
-    <h2>ログ</h2>
-    <pre>${db.logs.join("<br>")}</pre>
-  `)
-})
-
-app.post("/toggle", (req, res) => {
-  const db = loadDB()
-  db.emergency = req.body.mode === "on"
-  saveDB(db)
-  res.redirect("/")
-})
-
-app.post("/add", (req, res) => {
-  const db = loadDB()
-  db.settings.ngWords.push(req.body.word)
-  saveDB(db)
-  res.redirect("/")
-})
+// ===== 管理者通知 =====
+function notifyAdmins(msg, db) {
+  db.admins.forEach(id => {
+    client.pushMessage(id, { type: "text", text: msg })
+  })
+}
 
 // ===== UI =====
 function menuUI() {
@@ -121,63 +85,54 @@ function btn(text) {
   }
 }
 
-// ===== 管理者通知 =====
-function notifyAdmins(msg, db) {
-  db.admins.forEach(id => {
-    client.pushMessage(id, { type: "text", text: msg })
-  })
-}
-
 // ===== Webhook =====
 app.post("/webhook", line.middleware(config), async (req, res) => {
   try {
     for (const event of req.body.events) {
 
-      // ===== 新規参加 =====
+      const db = loadDB()
+
+      // ===== 参加 =====
       if (event.type === "memberJoined") {
-        const db = loadDB()
         const userId = event.joined.members[0].userId
-        const groupId = event.source.groupId || "private"
+        const groupId = event.source.groupId
 
         let name = "新規ユーザー"
         try {
-          const profile = await client.getGroupMemberProfile(groupId, userId)
-          name = profile.displayName
+          const p = await client.getGroupMemberProfile(groupId, userId)
+          name = p.displayName
         } catch {}
 
         if (db.banList.includes(userId)) {
-          return client.replyMessage(event.replyToken, {
+          await client.replyMessage(event.replyToken, {
             type: "text",
-            text: "🚫 BANユーザーが参加しました"
+            text: "🚫 BANユーザー参加"
           })
+          continue
         }
 
         if (!db.joined[userId]) {
           db.joined[userId] = true
           saveDB(db)
 
-          return client.replyMessage(event.replyToken, {
+          await client.replyMessage(event.replyToken, {
             type: "text",
             text:
               `👣 ようこそ ${name} さん\n\n` +
-              `【グループルール】\n` +
-              `・荒らし禁止\n` +
-              `・NGワード注意\n` +
-              `・違反は自動処理\n\n` +
-              `📌 ノートのルールを確認して下さい。\n` +
-              `確認したらイイね！\n\n` +
-              `「メニュー」で操作できます`
+              `・荒らし禁止\n・NG注意\n\n` +
+              `📌 ノート確認してイイね！\n\n` +
+              `「メニュー」で操作`
           })
+          continue
         }
       }
 
+      // ===== メッセージ以外無視 =====
       if (event.type !== "message" || event.message.type !== "text") continue
 
       const text = event.message.text
       const userId = event.source.userId
       const groupId = event.source.groupId || "private"
-
-      const db = loadDB()
 
       if (!db.groups[groupId]) {
         db.groups[groupId] = {
@@ -200,23 +155,25 @@ app.post("/webhook", line.middleware(config), async (req, res) => {
       db.logs.push(`${name}: ${text}`)
       if (db.logs.length > 50) db.logs.shift()
 
-      // BAN
+      // ===== BAN =====
       if (db.banList.includes(userId)) {
-        return client.replyMessage(event.replyToken, {
+        await client.replyMessage(event.replyToken, {
           type: "text",
           text: "🚫 制限中"
         })
+        continue
       }
 
-      // 緊急
+      // ===== 緊急 =====
       if (db.emergency && !db.admins.includes(userId)) {
-        return client.replyMessage(event.replyToken, {
+        await client.replyMessage(event.replyToken, {
           type: "text",
           text: "🚨 制限中"
         })
+        continue
       }
 
-      // ===== スパム検知 =====
+      // ===== スパム =====
       const now = Date.now()
       if (!db.spam[userId]) db.spam[userId] = []
       db.spam[userId].push(now)
@@ -226,10 +183,12 @@ app.post("/webhook", line.middleware(config), async (req, res) => {
         db.banList.push(userId)
         notifyAdmins(`🚫 スパムBAN: ${name}`, db)
         saveDB(db)
-        return client.replyMessage(event.replyToken, {
+
+        await client.replyMessage(event.replyToken, {
           type: "text",
           text: "🚫 スパムBAN"
         })
+        continue
       }
 
       // ===== NG =====
@@ -240,17 +199,21 @@ app.post("/webhook", line.middleware(config), async (req, res) => {
           db.banList.push(userId)
           notifyAdmins(`🚫 NG BAN: ${name}`, db)
           saveDB(db)
-          return client.replyMessage(event.replyToken, {
+
+          await client.replyMessage(event.replyToken, {
             type: "text",
             text: "🚫 BAN"
           })
+          continue
         }
 
         saveDB(db)
-        return client.replyMessage(event.replyToken, {
+
+        await client.replyMessage(event.replyToken, {
           type: "text",
           text: `⚠️ NG (${db.counts[userId]})`
         })
+        continue
       }
 
       // ===== 通報 =====
@@ -261,65 +224,61 @@ app.post("/webhook", line.middleware(config), async (req, res) => {
           db.banList.push(userId)
           notifyAdmins(`🚫 通報BAN: ${name}`, db)
           saveDB(db)
-          return client.replyMessage(event.replyToken, {
+
+          await client.replyMessage(event.replyToken, {
             type: "text",
             text: "🚫 通報BAN"
           })
+          continue
         }
 
         saveDB(db)
-        return client.replyMessage(event.replyToken, {
+
+        await client.replyMessage(event.replyToken, {
           type: "text",
           text: "通報受付"
         })
+        continue
       }
 
       // ===== UI =====
       if (text === "メニュー") {
-        return client.replyMessage(event.replyToken, menuUI())
+        await client.replyMessage(event.replyToken, menuUI())
+        continue
       }
 
       if (text === "設定") {
-        return client.replyMessage(event.replyToken, {
+        await client.replyMessage(event.replyToken, {
           type: "text",
           text: `NG: ${group.ngWords.join(", ")}`
         })
+        continue
       }
 
       // ===== 会話 =====
-      function rand(arr) {
-        return arr[Math.floor(Math.random() * arr.length)]
-      }
-
-      const patterns = [
-        { k: ["こんにちは"], r: ["こんにちは！", "やあ👋"] },
-        { k: ["おはよう"], r: ["おはよう☀️"] },
-        { k: ["暇"], r: ["それな😎", "何する？"] },
-        { k: ["ありがとう"], r: ["どういたしまして！"] }
-      ]
-
-      for (const p of patterns) {
-        if (p.k.some(k => text.includes(k))) {
-          return client.replyMessage(event.replyToken, {
-            type: "text",
-            text: rand(p.r)
-          })
-        }
+      if (text.includes("こんにちは")) {
+        await client.replyMessage(event.replyToken, {
+          type: "text",
+          text: "こんにちは！"
+        })
+        continue
       }
 
       if (Math.random() < 0.2) {
-        return client.replyMessage(event.replyToken, {
+        await client.replyMessage(event.replyToken, {
           type: "text",
-          text: rand(["なるほど", "いいね👍", "草"])
+          text: ["いいね👍", "それな", "草"][Math.floor(Math.random()*3)]
         })
+        continue
       }
 
-      saveDB(db)
-
-      return client.replyMessage(event.replyToken, {
+      // ===== デフォルト =====
+      await client.replyMessage(event.replyToken, {
         type: "text",
         text: "OK"
       })
+
+      saveDB(db)
     }
 
     res.sendStatus(200)
