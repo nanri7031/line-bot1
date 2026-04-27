@@ -104,7 +104,7 @@ app.post("/webhook", line.middleware(config), async (req,res)=>{
 
     for(const event of req.body.events){
 
-      // ===== 参加挨拶（pushで確実）=====
+      // ===== 新規参加挨拶 =====
       if(event.type === "memberJoined"){
         const gid = event.source.groupId
         initGroup(db,gid)
@@ -119,7 +119,6 @@ app.post("/webhook", line.middleware(config), async (req,res)=>{
         continue
       }
 
-      // ===== メッセージのみ処理 =====
       if(event.type !== "message") continue
       if(event.message.type !== "text") continue
 
@@ -226,29 +225,50 @@ app.post("/webhook", line.middleware(config), async (req,res)=>{
         reply = txt(`通報:${g.reports.length} / NG:${g.ngWords.length}`)
       }
 
-      // ===== 日常挨拶（軽量）=====
-      else if(["おはよう","おはよ"].includes(msg)){
-        reply = txt("おはようございます☀️")
+      // ===== みくちゃん挨拶（ランダム）=====
+      else if(msg.startsWith("みくちゃん")){
+
+        const text = msg.replace("みくちゃん","").trim()
+        const pick = (arr)=>arr[Math.floor(Math.random()*arr.length)]
+
+        if(["おはよう","おはよ"].includes(text)){
+          reply = txt(pick(["おはようございます☀️","おはよー！😊","今日もいい日になりますように✨"]))
+        }
+
+        else if(["こんにちは","こんちは"].includes(text)){
+          reply = txt(pick(["こんにちは😊","元気？✨","今日も頑張ろう💪"]))
+        }
+
+        else if(["こんばんは","こんば"].includes(text)){
+          reply = txt(pick(["こんばんは🌙","今日もお疲れ様😊","ゆっくりしてね✨"]))
+        }
+
+        else if(["おやすみ","おやすみなさい"].includes(text)){
+          reply = txt(pick(["おやすみなさい💤","いい夢見てね✨","ゆっくり休んでね😊"]))
+        }
+
+        else if(["ありがとう","ありがと","あり"].includes(text)){
+          reply = txt(pick(["どういたしまして😊","いえいえ✨","こちらこそありがとう😊"]))
+        }
+
+        else if(["おつ","お疲れ","おつかれ","お疲れ様","お疲れさま"].includes(text)){
+          reply = txt(pick(["お疲れ様です✨","今日もよく頑張ったね😊","ゆっくりしてね☕"]))
+        }
+
+        else if(["いただきます"].includes(text)){
+          reply = txt(pick(["どうぞ召し上がれ😊","たくさん食べてね🍽️","美味しく食べてね✨"]))
+        }
+
+        else if(["ごちそうさま","ご馳走様"].includes(text)){
+          reply = txt(pick(["お粗末様でした😊","満足できたかな？✨","また食べようね🍽️"]))
+        }
       }
 
-      else if(["こんにちは","こんちは"].includes(msg)){
-        reply = txt("こんにちは😊")
-      }
-
-      else if(["こんばんは","こんば"].includes(msg)){
-        reply = txt("こんばんは🌙")
-      }
-
-      else if(["おやすみ","おやすみなさい"].includes(msg)){
-        reply = txt("おやすみなさい💤")
-      }
-
-      // ===== その他は完全無視 =====
+      // ===== 完全無視 =====
       else{
         reply = null
       }
 
-      // 🔥 1回だけ返信
       if(reply){
         await client.replyMessage(event.replyToken, reply)
       }
