@@ -13,7 +13,7 @@ const client = new line.Client(config)
 
 const OWNER_ID = "U1a1aca9e44466f8cb05003d7dc86fee0"
 
-// DB
+// ===== DB =====
 const loadDB = () => JSON.parse(fs.readFileSync("db.json"))
 const saveDB = (db) => fs.writeFileSync("db.json", JSON.stringify(db, null, 2))
 
@@ -24,7 +24,8 @@ const initGroup = (db, gid) => {
       subAdmins: [],
       bans: [],
       ngWords: [],
-      reports: {},
+      reports: [],
+      reportCount: {},
       greeting: "",
       users: {}
     }
@@ -34,7 +35,7 @@ const initGroup = (db, gid) => {
 const isAdmin = (g, uid) =>
   g.admins.includes(uid) || g.subAdmins.includes(uid)
 
-// 名前取得
+// ===== 名前取得 =====
 async function getName(userId) {
   try {
     const p = await client.getProfile(userId)
@@ -44,253 +45,244 @@ async function getName(userId) {
   }
 }
 
-// 🔥 メニュー
-function mainMenu() {
+// ===== 管理者通知 =====
+async function notifyAdmins(g, text) {
+  for (const id of g.admins) {
+    try {
+      await client.pushMessage(id, { type: "text", text })
+    } catch {}
+  }
+}
+
+// ===== メニュー =====
+function menu() {
   return {
     type: "flex",
-    altText: "管理メニュー",
+    altText: "管理",
     contents: {
       type: "bubble",
       body: {
         type: "box",
         layout: "vertical",
-        spacing: "sm",
+        spacing: "md",
         contents: [
-          { type: "text", text: "管理メニュー", weight: "bold", size: "lg" },
 
-          btn("管理一覧", "管理一覧"),
-          btn("BAN管理", "BAN管理"),
-          btn("NG管理", "NG管理"),
-          btn("通報パネル", "通報パネル"),
-          btn("挨拶設定", "挨拶設定"),
-          btn("ログ", "ログ")
+          title("管理メニュー"),
+
+          row(btn("👑管理","管理登録"), btn("👥副管理","副管理登録")),
+          row(btn("📋一覧","管理一覧"), btn("❌削除","管理削除")),
+
+          row(btn("🔨BAN","BANモード","#e53935"), btn("📄一覧","BAN一覧","#e53935")),
+          row(btn("🚫NG","NG管理","#ff9800"), btn("➕追加","NG追加モード","#ff9800")),
+
+          row(btn("🚨通報","通報"), btn("📊ログ","通報ログ")),
+
+          row(btn("📝挨拶","挨拶設定モード","#2196f3"), btn("👀確認","挨拶確認","#2196f3")),
+
+          row(btn("⚠警告","キックモード","#9c27b0"), btn("📜履歴","ログ","#607d8b")),
+
+          row(btn("⚙情報","グループ情報","#607d8b"), btn("🧹リセット","リセット","#000"))
         ]
       }
     }
   }
 }
 
-function btn(label, text) {
-  return {
-    type: "button",
-    style: "primary",
-    action: { type: "message", label, text }
-  }
-}
+const btn = (label, text, color="#4CAF50") => ({
+  type:"button", style:"primary", color,
+  action:{type:"message",label,text}
+})
 
-// 🔥 BAN UI
-function banUI(g) {
-  const list = Object.entries(g.users).slice(0, 10)
+const row = (a,b)=>({
+  type:"box", layout:"horizontal", spacing:"sm",
+  contents:[
+    {type:"box",layout:"vertical",contents:[a],flex:1},
+    {type:"box",layout:"vertical",contents:[b],flex:1}
+  ]
+})
 
-  return {
-    type: "flex",
-    altText: "BAN管理",
-    contents: {
-      type: "bubble",
-      body: {
-        type: "box",
-        layout: "vertical",
-        contents: list.map(([id, name]) => ({
-          type: "button",
-          action: {
-            type: "message",
-            label: `${name}`,
-            text: `BAN:${id}`
-          }
-        }))
-      }
-    }
-  }
-}
+const title = t => ({type:"text",text:t,weight:"bold",size:"lg"})
 
-// 🔥 NG UI
-function ngUI(g) {
-  return {
-    type: "flex",
-    altText: "NG",
-    contents: {
-      type: "bubble",
-      body: {
-        type: "box",
-        layout: "vertical",
-        contents: g.ngWords.map(w => ({
-          type: "button",
-          action: {
-            type: "message",
-            label: `${w} 削除`,
-            text: `NGDEL:${w}`
-          }
-        }))
-      }
-    }
-  }
-}
-
-// 🔥 通報UI
-function reportUI(g) {
-  const arr = Object.entries(g.reports)
-
-  return {
-    type: "flex",
-    altText: "通報",
-    contents: {
-      type: "bubble",
-      body: {
-        type: "box",
-        layout: "vertical",
-        contents: arr.map(([uid, count]) => ({
-          type: "button",
-          action: {
-            type: "message",
-            label: `${g.users[uid] || uid} ×${count}`,
-            text: `BAN:${uid}`
-          }
-        }))
-      }
-    }
-  }
-}
-
-app.post("/webhook", line.middleware(config), async (req, res) => {
-  try {
+// ===== メイン =====
+app.post("/webhook", line.middleware(config), async (req,res)=>{
+  try{
     const db = loadDB()
 
-    for (const event of req.body.events) {
+    for(const event of req.body.events){
 
-      if (!event.source.groupId) continue
+      if(!event.source) continue
 
-      const gid = event.source.groupId
+      const gid = event.source.groupId || event.source.userId
       const uid = event.source.userId
 
-      initGroup(db, gid)
+      initGroup(db,gid)
       const g = db.groups[gid]
 
-      if (!g.users[uid]) {
+      // ユーザー登録
+      if(uid && !g.users[uid]){
         g.users[uid] = await getName(uid)
         saveDB(db)
       }
 
-      if (event.type === "memberJoined") {
-        if (g.greeting) {
-          await client.replyMessage(event.replyToken, {
-            type: "text",
-            text: g.greeting
-          })
-        }
+      // 挨拶
+      if(event.type==="memberJoined" && g.greeting){
+        await client.replyMessage(event.replyToken,{type:"text",text:g.greeting})
       }
 
-      if (event.type !== "message") continue
-
+      if(event.type!=="message") continue
       const msg = event.message.text
 
-      // BAN制御
-      if (g.bans.includes(uid)) {
-        await client.replyMessage(event.replyToken, {
-          type: "text",
-          text: "⚠️ 制限中"
-        })
-        return
+      // ===== BAN制御 =====
+      if(g.bans.includes(uid)){
+        return reply("⚠ 制限中")
       }
 
-      // NG検知
-      for (const ng of g.ngWords) {
-        if (msg.includes(ng)) {
-          g.reports[uid] = (g.reports[uid] || 0) + 1
+      // ===== NG検知＋自動BAN =====
+      for(const ng of g.ngWords){
+        if(msg.includes(ng)){
+          g.reportCount[uid]=(g.reportCount[uid]||0)+1
+
+          if(g.reportCount[uid]>=3){
+            g.bans.push(uid)
+            notifyAdmins(g, `🚨自動BAN: ${g.users[uid]}`)
+          }
+
+          saveDB(db)
+          return reply("⚠ NG検出")
+        }
+      }
+
+      // ===== GUI =====
+      if(msg==="メニュー"){
+        return client.replyMessage(event.replyToken, menu())
+      }
+
+      // 管理
+      if(msg==="管理登録"){
+        if(!g.admins.includes(uid)){
+          g.admins.push(uid)
+          saveDB(db)
+        }
+        return reply("管理登録OK")
+      }
+
+      if(msg==="副管理登録"){
+        g.subAdmins.push(uid)
+        saveDB(db)
+        return reply("副管理OK")
+      }
+
+      if(msg==="管理一覧"){
+        return reply([...g.admins,...g.subAdmins].map(i=>g.users[i]).join("\n"))
+      }
+
+      if(msg==="管理削除"){
+        g.admins=g.admins.filter(i=>i!==uid)
+        saveDB(db)
+        return reply("削除OK")
+      }
+
+      // ===== メンションBAN =====
+      if(msg.startsWith("@")){
+        if(!isAdmin(g,uid)) return
+
+        const targetName = msg.replace("@","")
+        const targetId = Object.keys(g.users)
+          .find(id => g.users[id] === targetName)
+
+        if(targetId){
+          g.bans.push(targetId)
           saveDB(db)
 
-          await client.replyMessage(event.replyToken, {
-            type: "text",
-            text: "⚠️ NGワード"
-          })
-          return
+          notifyAdmins(g, `🔨BAN: ${targetName}`)
+
+          return reply("BAN完了")
         }
       }
 
-      // ===== GUI操作 =====
-
-      if (msg === "メニュー") {
-        await client.replyMessage(event.replyToken, mainMenu())
-      }
-
-      else if (msg === "BAN管理") {
-        await client.replyMessage(event.replyToken, banUI(g))
-      }
-
-      else if (msg.startsWith("BAN:")) {
-        if (!isAdmin(g, uid)) return
-
-        const target = msg.replace("BAN:", "")
-        if (!g.bans.includes(target)) {
-          g.bans.push(target)
-        }
-        saveDB(db)
-
-        await client.replyMessage(event.replyToken, {
-          type: "text",
-          text: "BAN完了"
+      // ===== 通報 =====
+      if(msg==="通報"){
+        g.reports.push({
+          from: uid,
+          name: g.users[uid],
+          time: Date.now()
         })
-      }
 
-      else if (msg === "NG管理") {
-        await client.replyMessage(event.replyToken, ngUI(g))
-      }
+        notifyAdmins(g, `🚨通報: ${g.users[uid]}`)
 
-      else if (msg.startsWith("NGDEL:")) {
-        const word = msg.replace("NGDEL:", "")
-        g.ngWords = g.ngWords.filter(w => w !== word)
         saveDB(db)
-
-        await client.replyMessage(event.replyToken, {
-          type: "text",
-          text: "削除完了"
-        })
+        return reply("通報完了")
       }
 
-      else if (msg === "通報パネル") {
-        await client.replyMessage(event.replyToken, reportUI(g))
-      }
-
-      else if (msg === "通報") {
-        g.reports[uid] = (g.reports[uid] || 0) + 1
-        saveDB(db)
-
-        await client.replyMessage(event.replyToken, {
-          type: "text",
-          text: "通報済"
-        })
-      }
-
-      else if (msg === "管理一覧") {
-        const txt = [...g.admins, ...g.subAdmins]
-          .map(id => g.users[id] || id)
+      if(msg==="通報ログ"){
+        const log = g.reports.slice(-5)
+          .map(r=>r.name)
           .join("\n")
 
-        await client.replyMessage(event.replyToken, {
-          type: "text",
-          text: txt || "なし"
-        })
+        return reply(log||"なし")
       }
 
-      else if (msg.startsWith("挨拶設定 ")) {
-        g.greeting = msg.replace("挨拶設定 ", "")
+      // ===== NG =====
+      if(msg==="NG追加モード"){
+        return reply("NG追加:ワード")
+      }
+
+      if(msg.startsWith("NG追加:")){
+        const w=msg.replace("NG追加:","")
+        g.ngWords.push(w)
         saveDB(db)
-
-        await client.replyMessage(event.replyToken, {
-          type: "text",
-          text: "設定OK"
-        })
+        return reply("追加OK")
       }
 
-      else {
-        await client.replyMessage(event.replyToken, {
-          type: "text",
-          text: "OK"
-        })
+      if(msg==="NG管理"){
+        return reply(g.ngWords.join("\n")||"なし")
       }
+
+      // ===== 擬似キック =====
+      if(msg==="キックモード"){
+        return reply("⚠ 警告したい人を @名前 で送信")
+      }
+
+      // ===== 挨拶 =====
+      if(msg==="挨拶設定モード"){
+        return reply("挨拶設定:内容")
+      }
+
+      if(msg.startsWith("挨拶設定:")){
+        g.greeting=msg.replace("挨拶設定:","")
+        saveDB(db)
+        return reply("設定OK")
+      }
+
+      if(msg==="挨拶確認"){
+        return reply(g.greeting||"未設定")
+      }
+
+      // ===== その他 =====
+      if(msg==="ログ"){
+        return reply(`通報:${g.reports.length} BAN:${g.bans.length}`)
+      }
+
+      if(msg==="グループ情報"){
+        return reply(`管理:${g.admins.length} NG:${g.ngWords.length}`)
+      }
+
+      if(msg==="リセット"){
+        db.groups[gid]=null
+        saveDB(db)
+        return reply("リセット完了")
+      }
+
+      function reply(text){
+        return client.replyMessage(event.replyToken,{type:"text",text})
+      }
+
+      return reply("OK")
     }
 
     res.sendStatus(200)
-  } catch (e) {
+
+  }catch(e){
     console.log(e)
     res.sendStatus(500)
   }
