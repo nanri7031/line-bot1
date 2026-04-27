@@ -41,6 +41,29 @@ const initGroup = (db, gid) => {
 const isAdmin = (g, uid)=>
   g.admins.includes(uid) || g.subAdmins.includes(uid)
 
+// ===== UI =====
+const title = t => ({
+  type:"text",
+  text:t,
+  weight:"bold",
+  size:"lg",
+  color:"#1565C0"
+})
+
+const btn = (t, color="#1976D2") => ({
+  type:"button",
+  style:"primary",
+  color,
+  action:{type:"message",label:t,text:t}
+})
+
+const row = (a,b)=>({
+  type:"box",
+  layout:"horizontal",
+  spacing:"sm",
+  contents:[a,b]
+})
+
 // ===== MENU =====
 function menu(){
   return {
@@ -53,30 +76,26 @@ function menu(){
         layout:"vertical",
         spacing:"md",
         contents:[
+
           title("管理メニュー"),
-          row("管理登録","副管理登録"),
-          row("管理一覧","管理削除"),
-          row("BANモード","BAN一覧"),
-          row("NG管理","NG追加モード"),
-          row("通報","通報ログ"),
-          row("挨拶設定モード","挨拶確認"),
-          row("キックモード","ログ")
+
+          row(btn("管理登録"), btn("副管理登録")),
+          row(btn("管理一覧"), btn("管理削除")),
+
+          row(btn("BANモード","#D32F2F"), btn("BAN一覧","#D32F2F")),
+
+          row(btn("NG管理","#0288D1"), btn("NG追加モード","#0288D1")),
+
+          row(btn("通報","#F57C00"), btn("通報ログ","#F57C00")),
+
+          row(btn("挨拶設定モード","#0097A7"), btn("挨拶確認","#0097A7")),
+
+          row(btn("キックモード","#7B1FA2"), btn("ログ","#455A64"))
         ]
       }
     }
   }
 }
-
-const title=t=>({type:"text",text:t,weight:"bold",size:"lg"})
-const row=(a,b)=>({
-  type:"box",layout:"horizontal",spacing:"sm",
-  contents:[btn(a),btn(b)]
-})
-const btn=t=>({
-  type:"button",
-  action:{type:"message",label:t,text:t},
-  style:"primary"
-})
 
 // ===== MAIN =====
 app.post("/webhook", line.middleware(config), async (req,res)=>{
@@ -180,7 +199,7 @@ app.post("/webhook", line.middleware(config), async (req,res)=>{
       }
 
       else if(msg==="通報ログ"){
-        replyMsg = txt(g.reports.length+"件")
+        replyMsg = txt("通報数："+g.reports.length)
       }
 
       // ===== 挨拶 =====
@@ -213,7 +232,7 @@ app.post("/webhook", line.middleware(config), async (req,res)=>{
         replyMsg = txt("OK")
       }
 
-      // 🔥 1回だけ返信（超重要）
+      // 🔥 必ず1回だけ返信
       if(replyMsg){
         await client.replyMessage(event.replyToken, replyMsg)
       }
@@ -227,6 +246,6 @@ app.post("/webhook", line.middleware(config), async (req,res)=>{
   }
 })
 
-const txt=t=>({type:"text",text:t})
+const txt = t => ({type:"text",text:t})
 
 app.listen(process.env.PORT || 3000)
