@@ -105,6 +105,29 @@ app.post("/webhook", line.middleware(config), async (req,res)=>{
 
     for(const event of req.body.events){
 
+      // ===== 新規参加挨拶（ここ重要）=====
+      if(event.type === "memberJoined"){
+
+        const gid = event.source.groupId
+        initGroup(db,gid)
+
+        const g = db.groups[gid]
+
+        if(g.greeting){
+          try{
+            await client.replyMessage(event.replyToken,{
+              type:"text",
+              text:g.greeting
+            })
+          }catch(e){
+            console.log("挨拶送信エラー")
+          }
+        }
+
+        continue
+      }
+
+      // ===== メッセージ処理 =====
       if(event.type !== "message") continue
       if(event.message.type !== "text") continue
 
@@ -232,7 +255,7 @@ app.post("/webhook", line.middleware(config), async (req,res)=>{
         replyMsg = txt("OK")
       }
 
-      // 🔥 必ず1回だけ返信
+      // 🔥 1回だけ返信
       if(replyMsg){
         await client.replyMessage(event.replyToken, replyMsg)
       }
@@ -241,7 +264,7 @@ app.post("/webhook", line.middleware(config), async (req,res)=>{
     res.sendStatus(200)
 
   }catch(e){
-    console.log(e)
+    console.log("エラー:",e)
     res.sendStatus(200)
   }
 })
