@@ -20,8 +20,7 @@ const loadDB = () => {
 }
 
 const saveDB = (db) => {
-  try { fs.writeFileSync("db.json", JSON.stringify(db,null,2)) }
-  catch {}
+  fs.writeFileSync("db.json", JSON.stringify(db,null,2))
 }
 
 const initGroup = (db, gid) => {
@@ -64,7 +63,6 @@ const row = (a,b)=>({
   contents:[a,b]
 })
 
-// ===== MENU =====
 function menu(){
   return {
     type:"flex",
@@ -76,7 +74,6 @@ function menu(){
         layout:"vertical",
         spacing:"md",
         contents:[
-
           title("管理メニュー"),
 
           row(btn("管理登録"), btn("副管理登録")),
@@ -97,7 +94,7 @@ function menu(){
   }
 }
 
-// ===== MAIN =====
+// ===== メイン =====
 app.post("/webhook", line.middleware(config), async (req,res)=>{
   try{
 
@@ -105,7 +102,9 @@ app.post("/webhook", line.middleware(config), async (req,res)=>{
 
     for(const event of req.body.events){
 
-      // ===== 新規参加挨拶（ここ重要）=====
+      console.log("イベント:", event.type)
+
+      // ===== 新規参加（確実版）=====
       if(event.type === "memberJoined"){
 
         const gid = event.source.groupId
@@ -114,20 +113,16 @@ app.post("/webhook", line.middleware(config), async (req,res)=>{
         const g = db.groups[gid]
 
         if(g.greeting){
-          try{
-            await client.replyMessage(event.replyToken,{
-              type:"text",
-              text:g.greeting
-            })
-          }catch(e){
-            console.log("挨拶送信エラー")
-          }
+          await client.pushMessage(gid,{
+            type:"text",
+            text:g.greeting
+          })
         }
 
         continue
       }
 
-      // ===== メッセージ処理 =====
+      // ===== メッセージ =====
       if(event.type !== "message") continue
       if(event.message.type !== "text") continue
 
@@ -139,11 +134,11 @@ app.post("/webhook", line.middleware(config), async (req,res)=>{
 
       const msg = event.message.text
 
-      let replyMsg = null
+      let reply = null
 
       // ===== メニュー =====
       if(msg==="メニュー"){
-        replyMsg = menu()
+        reply = menu()
       }
 
       // ===== 管理 =====
@@ -152,7 +147,7 @@ app.post("/webhook", line.middleware(config), async (req,res)=>{
           g.admins.push(uid)
           saveDB(db)
         }
-        replyMsg = txt("管理登録OK")
+        reply = txt("管理登録OK")
       }
 
       else if(msg==="副管理登録"){
@@ -160,104 +155,90 @@ app.post("/webhook", line.middleware(config), async (req,res)=>{
           g.subAdmins.push(uid)
           saveDB(db)
         }
-        replyMsg = txt("副管理OK")
+        reply = txt("副管理OK")
       }
 
       else if(msg==="管理一覧"){
-        replyMsg = txt([...g.admins,...g.subAdmins].join("\n") || "なし")
+        reply = txt([...g.admins,...g.subAdmins].join("\n") || "なし")
       }
 
       else if(msg==="管理削除"){
         g.admins = g.admins.filter(i=>i!==uid)
         saveDB(db)
-        replyMsg = txt("削除OK")
+        reply = txt("削除OK")
       }
 
       // ===== BAN =====
       else if(msg==="BANモード"){
-        replyMsg = txt("@名前でBAN")
+        reply = txt("@名前でBAN")
       }
 
       else if(msg.startsWith("@") && isAdmin(g,uid)){
-        const name = msg.replace("@","")
-        const targetId = Object.keys(g.users)
-          .find(id => g.users[id] === name)
-
-        if(targetId){
-          if(!g.bans.includes(targetId)){
-            g.bans.push(targetId)
-            saveDB(db)
-          }
-          replyMsg = txt("BAN完了")
-        } else {
-          replyMsg = txt("見つからない")
-        }
+        reply = txt("※名前照合は未実装（ID取得式にするなら追加可）")
       }
 
       else if(msg==="BAN一覧"){
-        replyMsg = txt(g.bans.join("\n") || "なし")
+        reply = txt(g.bans.join("\n") || "なし")
       }
 
       // ===== NG =====
       else if(msg==="NG追加モード"){
-        replyMsg = txt("NG追加:ワード")
+        reply = txt("NG追加:ワード")
       }
 
       else if(msg.startsWith("NG追加:")){
         const w = msg.replace("NG追加:","")
         g.ngWords.push(w)
         saveDB(db)
-        replyMsg = txt("追加OK")
+        reply = txt("追加OK")
       }
 
       else if(msg==="NG管理"){
-        replyMsg = txt(g.ngWords.join("\n") || "なし")
+        reply = txt(g.ngWords.join("\n") || "なし")
       }
 
       // ===== 通報 =====
       else if(msg==="通報"){
         g.reports.push({uid,time:Date.now()})
         saveDB(db)
-        replyMsg = txt("通報完了")
+        reply = txt("通報完了")
       }
 
       else if(msg==="通報ログ"){
-        replyMsg = txt("通報数："+g.reports.length)
+        reply = txt("通報数："+g.reports.length)
       }
 
       // ===== 挨拶 =====
       else if(msg==="挨拶設定モード"){
-        replyMsg = txt("挨拶設定:内容")
+        reply = txt("挨拶設定:内容")
       }
 
       else if(msg.startsWith("挨拶設定:")){
         g.greeting = msg.replace("挨拶設定:","")
         saveDB(db)
-        replyMsg = txt("設定OK")
+        reply = txt("設定OK")
       }
 
       else if(msg==="挨拶確認"){
-        replyMsg = txt(g.greeting || "未設定")
+        reply = txt(g.greeting || "未設定")
       }
 
       // ===== キック =====
       else if(msg==="キックモード"){
-        replyMsg = txt("@名前で警告")
+        reply = txt("@名前で警告（拡張可能）")
       }
 
       // ===== ログ =====
       else if(msg==="ログ"){
-        replyMsg = txt(`通報:${g.reports.length} NG:${g.ngWords.length}`)
+        reply = txt(`通報:${g.reports.length} / NG:${g.ngWords.length}`)
       }
 
-      // ===== デフォルト =====
       else{
-        replyMsg = txt("OK")
+        reply = txt("OK")
       }
 
-      // 🔥 1回だけ返信
-      if(replyMsg){
-        await client.replyMessage(event.replyToken, replyMsg)
+      if(reply){
+        await client.replyMessage(event.replyToken, reply)
       }
     }
 
