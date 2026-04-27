@@ -41,7 +41,7 @@ const initGroup = (db, gid) => {
 const isAdmin = (g, uid)=>
   g.admins.includes(uid) || g.subAdmins.includes(uid)
 
-// ===== メニュー =====
+// ===== MENU =====
 function menu(){
   return {
     type:"flex",
@@ -51,8 +51,9 @@ function menu(){
       body:{
         type:"box",
         layout:"vertical",
+        spacing:"md",
         contents:[
-          txt("管理メニュー"),
+          title("管理メニュー"),
           row("管理登録","副管理登録"),
           row("管理一覧","管理削除"),
           row("BANモード","BAN一覧"),
@@ -66,17 +67,18 @@ function menu(){
   }
 }
 
-const txt=t=>({type:"text",text:t,weight:"bold"})
+const title=t=>({type:"text",text:t,weight:"bold",size:"lg"})
 const row=(a,b)=>({
-  type:"box",layout:"horizontal",
+  type:"box",layout:"horizontal",spacing:"sm",
   contents:[btn(a),btn(b)]
 })
 const btn=t=>({
   type:"button",
-  action:{type:"message",label:t,text:t}
+  action:{type:"message",label:t,text:t},
+  style:"primary"
 })
 
-// ===== メイン =====
+// ===== MAIN =====
 app.post("/webhook", line.middleware(config), async (req,res)=>{
   try{
 
@@ -108,31 +110,110 @@ app.post("/webhook", line.middleware(config), async (req,res)=>{
           g.admins.push(uid)
           saveDB(db)
         }
-        replyMsg = {type:"text",text:"管理登録OK"}
+        replyMsg = txt("管理登録OK")
+      }
+
+      else if(msg==="副管理登録"){
+        if(!g.subAdmins.includes(uid)){
+          g.subAdmins.push(uid)
+          saveDB(db)
+        }
+        replyMsg = txt("副管理OK")
       }
 
       else if(msg==="管理一覧"){
-        replyMsg = {
-          type:"text",
-          text: g.admins.join("\n") || "なし"
-        }
+        replyMsg = txt([...g.admins,...g.subAdmins].join("\n") || "なし")
+      }
+
+      else if(msg==="管理削除"){
+        g.admins = g.admins.filter(i=>i!==uid)
+        saveDB(db)
+        replyMsg = txt("削除OK")
       }
 
       // ===== BAN =====
       else if(msg==="BANモード"){
-        replyMsg = {type:"text",text:"@名前でBAN"}
+        replyMsg = txt("@名前でBAN")
       }
 
       else if(msg.startsWith("@") && isAdmin(g,uid)){
-        replyMsg = {type:"text",text:"BAN完了"}
+        const name = msg.replace("@","")
+        const targetId = Object.keys(g.users)
+          .find(id => g.users[id] === name)
+
+        if(targetId){
+          if(!g.bans.includes(targetId)){
+            g.bans.push(targetId)
+            saveDB(db)
+          }
+          replyMsg = txt("BAN完了")
+        } else {
+          replyMsg = txt("見つからない")
+        }
+      }
+
+      else if(msg==="BAN一覧"){
+        replyMsg = txt(g.bans.join("\n") || "なし")
+      }
+
+      // ===== NG =====
+      else if(msg==="NG追加モード"){
+        replyMsg = txt("NG追加:ワード")
+      }
+
+      else if(msg.startsWith("NG追加:")){
+        const w = msg.replace("NG追加:","")
+        g.ngWords.push(w)
+        saveDB(db)
+        replyMsg = txt("追加OK")
+      }
+
+      else if(msg==="NG管理"){
+        replyMsg = txt(g.ngWords.join("\n") || "なし")
+      }
+
+      // ===== 通報 =====
+      else if(msg==="通報"){
+        g.reports.push({uid,time:Date.now()})
+        saveDB(db)
+        replyMsg = txt("通報完了")
+      }
+
+      else if(msg==="通報ログ"){
+        replyMsg = txt(g.reports.length+"件")
+      }
+
+      // ===== 挨拶 =====
+      else if(msg==="挨拶設定モード"){
+        replyMsg = txt("挨拶設定:内容")
+      }
+
+      else if(msg.startsWith("挨拶設定:")){
+        g.greeting = msg.replace("挨拶設定:","")
+        saveDB(db)
+        replyMsg = txt("設定OK")
+      }
+
+      else if(msg==="挨拶確認"){
+        replyMsg = txt(g.greeting || "未設定")
+      }
+
+      // ===== キック =====
+      else if(msg==="キックモード"){
+        replyMsg = txt("@名前で警告")
+      }
+
+      // ===== ログ =====
+      else if(msg==="ログ"){
+        replyMsg = txt(`通報:${g.reports.length} NG:${g.ngWords.length}`)
       }
 
       // ===== デフォルト =====
       else{
-        replyMsg = {type:"text",text:"OK"}
+        replyMsg = txt("OK")
       }
 
-      // 🔥 ここが最重要（1回だけ）
+      // 🔥 1回だけ返信（超重要）
       if(replyMsg){
         await client.replyMessage(event.replyToken, replyMsg)
       }
@@ -145,5 +226,7 @@ app.post("/webhook", line.middleware(config), async (req,res)=>{
     res.sendStatus(200)
   }
 })
+
+const txt=t=>({type:"text",text:t})
 
 app.listen(process.env.PORT || 3000)
