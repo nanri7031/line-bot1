@@ -94,7 +94,9 @@ function menu(){
   }
 }
 
-// ===== メイン =====
+const txt = t => ({type:"text",text:t})
+
+// ===== MAIN =====
 app.post("/webhook", line.middleware(config), async (req,res)=>{
   try{
 
@@ -102,14 +104,10 @@ app.post("/webhook", line.middleware(config), async (req,res)=>{
 
     for(const event of req.body.events){
 
-      console.log("イベント:", event.type)
-
-      // ===== 新規参加（確実版）=====
+      // ===== 参加挨拶（pushで確実）=====
       if(event.type === "memberJoined"){
-
         const gid = event.source.groupId
         initGroup(db,gid)
-
         const g = db.groups[gid]
 
         if(g.greeting){
@@ -118,11 +116,10 @@ app.post("/webhook", line.middleware(config), async (req,res)=>{
             text:g.greeting
           })
         }
-
         continue
       }
 
-      // ===== メッセージ =====
+      // ===== メッセージのみ処理 =====
       if(event.type !== "message") continue
       if(event.message.type !== "text") continue
 
@@ -173,10 +170,6 @@ app.post("/webhook", line.middleware(config), async (req,res)=>{
         reply = txt("@名前でBAN")
       }
 
-      else if(msg.startsWith("@") && isAdmin(g,uid)){
-        reply = txt("※名前照合は未実装（ID取得式にするなら追加可）")
-      }
-
       else if(msg==="BAN一覧"){
         reply = txt(g.bans.join("\n") || "なし")
       }
@@ -208,7 +201,7 @@ app.post("/webhook", line.middleware(config), async (req,res)=>{
         reply = txt("通報数："+g.reports.length)
       }
 
-      // ===== 挨拶 =====
+      // ===== 挨拶設定 =====
       else if(msg==="挨拶設定モード"){
         reply = txt("挨拶設定:内容")
       }
@@ -225,7 +218,7 @@ app.post("/webhook", line.middleware(config), async (req,res)=>{
 
       // ===== キック =====
       else if(msg==="キックモード"){
-        reply = txt("@名前で警告（拡張可能）")
+        reply = txt("@名前で警告")
       }
 
       // ===== ログ =====
@@ -233,10 +226,29 @@ app.post("/webhook", line.middleware(config), async (req,res)=>{
         reply = txt(`通報:${g.reports.length} / NG:${g.ngWords.length}`)
       }
 
-      else{
-        reply = txt("OK")
+      // ===== 日常挨拶（軽量）=====
+      else if(["おはよう","おはよ"].includes(msg)){
+        reply = txt("おはようございます☀️")
       }
 
+      else if(["こんにちは","こんちは"].includes(msg)){
+        reply = txt("こんにちは😊")
+      }
+
+      else if(["こんばんは","こんば"].includes(msg)){
+        reply = txt("こんばんは🌙")
+      }
+
+      else if(["おやすみ","おやすみなさい"].includes(msg)){
+        reply = txt("おやすみなさい💤")
+      }
+
+      // ===== その他は完全無視 =====
+      else{
+        reply = null
+      }
+
+      // 🔥 1回だけ返信
       if(reply){
         await client.replyMessage(event.replyToken, reply)
       }
@@ -249,7 +261,5 @@ app.post("/webhook", line.middleware(config), async (req,res)=>{
     res.sendStatus(200)
   }
 })
-
-const txt = t => ({type:"text",text:t})
 
 app.listen(process.env.PORT || 3000)
