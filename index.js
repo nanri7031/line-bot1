@@ -31,6 +31,8 @@ const initGroup = (db, gid) => {
       bans:{},
       ngWords:[],
       reports:[],
+      logs:[],
+      users:{},
       greeting:""
     }
   }
@@ -41,6 +43,19 @@ const isAdmin = (g, uid)=>
 
 const txt = t => ({type:"text",text:t})
 
+// ===== 名前取得（キャッシュ）=====
+const getName = async (gid, uid, g)=>{
+  if(g.users[uid]) return g.users[uid]
+
+  try{
+    const p = await client.getGroupMemberProfile(gid, uid)
+    g.users[uid] = p.displayName
+    return p.displayName
+  }catch{
+    return uid
+  }
+}
+
 // ===== MAIN =====
 app.post("/webhook", line.middleware(config), async (req,res)=>{
   try{
@@ -49,7 +64,6 @@ app.post("/webhook", line.middleware(config), async (req,res)=>{
 
     for(const event of req.body.events){
 
-      // ===== 参加時 =====
       if(event.type === "memberJoined"){
         const gid = event.source.groupId
         initGroup(db,gid)
@@ -71,9 +85,13 @@ app.post("/webhook", line.middleware(config), async (req,res)=>{
       const g = db.groups[gid]
 
       const msg = event.message.text
-
-      // ===== メンション取得 =====
       const mentions = event.message.mention?.mentionees || []
+
+      const name = await getName(gid, uid, g)
+
+      // ===== ログ =====
+      g.logs.push({user:name,text:msg,time:Date.now()})
+      if(g.logs.length>50) g.logs.shift()
 
       // ===== BAN制限 =====
       if(g.bans[uid] >= 3){
@@ -83,32 +101,84 @@ app.post("/webhook", line.middleware(config), async (req,res)=>{
       // ===== NG検知 =====
       if(!isAdmin(g,uid) && g.ngWords.some(w => msg.includes(w))){
         g.bans[uid] = (g.bans[uid] || 0) + 1
+        g.reports.push({target:uid,name,time:Date.now()})
         saveDB(db)
 
         return await client.replyMessage(
           event.replyToken,
-          txt(`⚠️ NG検知（${g.bans[uid]}回）`)
+          txt(`⚠️ ${name} NG検知（${g.bans[uid]}回）`)
         )
       }
 
       let reply = null
 
-      // ===== 通報（メンション）=====
-      if(msg === "通報" && mentions.length > 0){
-        const target = mentions[0].userId
+      // ===== 自動注意 =====
+      if(g.bans[uid] === 2){
+        reply = txt(`⚠️ ${name} あと1回で制限`)
+      }
 
-        g.reports.push({target,time:Date.now()})
+      // ===== 通報 =====
+      else if(msg==="通報" && mentions.length>0){
+        const target = mentions[0].userId
+        const tName = await getName(gid,target,g)
+
+        g.reports.push({target,name:tName,time:Date.now()})
         g.bans[target] = (g.bans[target] || 0) + 1
 
         saveDB(db)
-        reply = txt("通報受付")
+        reply = txt(`通報受付: ${tName}`)
+      }
+
+      // ===== 通報ログ =====
+      else if(msg==="通報ログ"){
+        const log = g.reports
+          .map(r=>`${r.name}`)
+          .join("\n")
+        reply = txt(log || "なし")
+      }
+
+      // ===== 通報ランキング =====
+      else if(msg==="通報ランキング"){
+        const count = {}
+
+        g.reports.forEach(r=>{
+          count[r.name] = (count[r.name]||0)+1
+        })
+
+        const ranking = Object.entries(count)
+          .sort((a,b)=>b[1]-a[1])
+          .map(([n,c])=>`${n}: ${c}`)
+          .join("\n")
+
+        reply = txt(ranking || "なし")
+      }
+
+      // ===== キック =====
+      else if(msg==="キック" && mentions.length>0){
+        const target = mentions[0].userId
+        const tName = await getName(gid,target,g)
+
+        g.bans[target] = 999
+        saveDB(db)
+
+        reply = txt(`⚠️ ${tName} キック`)
+      }
+
+      // ===== ログ =====
+      else if(msg==="ログ"){
+        const log = g.logs
+          .map(l=>`${l.user}: ${l.text}`)
+          .join("\n")
+
+        reply = txt(log || "なし")
       }
 
       // ===== BAN一覧 =====
-      else if(msg === "BAN一覧"){
+      else if(msg==="BAN一覧"){
         const list = Object.entries(g.bans)
-          .map(([id,c])=>`${id}:${c}`)
+          .map(([id,c])=>`${g.users[id]||id}: ${c}`)
           .join("\n")
+
         reply = txt(list || "なし")
       }
 
@@ -120,53 +190,26 @@ app.post("/webhook", line.middleware(config), async (req,res)=>{
         reply = txt("追加OK")
       }
 
-      else if(msg === "NG管理"){
-        reply = txt(g.ngWords.join("\n") || "なし")
-      }
-
-      // ===== 挨拶設定 =====
-      else if(msg.startsWith("挨拶設定:")){
-        g.greeting = msg.replace("挨拶設定:","")
-        saveDB(db)
-        reply = txt("設定OK")
-      }
-
-      else if(msg === "挨拶確認"){
-        reply = txt(g.greeting || "未設定")
-      }
-
-      // ===== みくちゃん挨拶 =====
+      // ===== みくちゃん =====
       else if(msg.startsWith("みくちゃん")){
-        const text = msg.replace("みくちゃん","").trim()
-        const pick = arr => arr[Math.floor(Math.random()*arr.length)]
+        const t = msg.replace("みくちゃん","").trim()
+        const pick = a=>a[Math.floor(Math.random()*a.length)]
 
-        if(text.includes("おは")){
-          reply = txt(pick(["おはよう☀️","今日も頑張ろ😊"]))
-        }
-        else if(text.includes("ありが")){
-          reply = txt(pick(["どういたしまして😊","いえいえ✨"]))
-        }
-        else if(text.includes("おつ")){
-          reply = txt(pick(["お疲れ様✨","ゆっくりしてね☕"]))
-        }
-        else if(text.includes("いただきます")){
-          reply = txt(pick(["どうぞ😊","いっぱい食べてね🍽️"]))
-        }
-        else if(text.includes("ごちそう")){
-          reply = txt(pick(["お粗末様😊","また食べてね✨"]))
-        }
+        if(t.includes("おは")) reply = txt(pick(["おはよう☀️","今日も頑張ろ😊"]))
+        else if(t.includes("ありが")) reply = txt(pick(["どういたしまして😊"]))
+        else if(t.includes("おつ")) reply = txt(pick(["お疲れ様✨"]))
       }
 
-      // ===== その他は無反応 =====
       if(reply){
         await client.replyMessage(event.replyToken, reply)
       }
     }
 
+    saveDB(db)
     res.sendStatus(200)
 
   }catch(e){
-    console.log("エラー:",e)
+    console.log(e)
     res.sendStatus(200)
   }
 })
