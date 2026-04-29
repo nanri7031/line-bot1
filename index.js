@@ -1,5 +1,5 @@
 import express from "express"
-import line from "@line/bot-sdk"
+import * as line from "@line/bot-sdk"
 import fs from "fs"
 
 const app = express()
@@ -28,7 +28,7 @@ const initGroup = (db, gid) => {
     db.groups[gid] = {
       admins:[OWNER_ID],
       subAdmins:[],
-      bans:{}, // ← 変更（回数管理）
+      bans:{},
       ngWords:[],
       reports:[],
       greeting:""
@@ -49,6 +49,18 @@ app.post("/webhook", line.middleware(config), async (req,res)=>{
 
     for(const event of req.body.events){
 
+      // ===== 参加時 =====
+      if(event.type === "memberJoined"){
+        const gid = event.source.groupId
+        initGroup(db,gid)
+        const g = db.groups[gid]
+
+        if(g.greeting){
+          await client.pushMessage(gid, txt(g.greeting))
+        }
+        continue
+      }
+
       if(event.type !== "message") continue
       if(event.message.type !== "text") continue
 
@@ -63,35 +75,33 @@ app.post("/webhook", line.middleware(config), async (req,res)=>{
       // ===== メンション取得 =====
       const mentions = event.message.mention?.mentionees || []
 
-      // ===== BANチェック =====
+      // ===== BAN制限 =====
       if(g.bans[uid] >= 3){
-        return await client.replyMessage(event.replyToken, txt("⚠️ 利用制限中です"))
+        return await client.replyMessage(event.replyToken, txt("⚠️ 利用制限中"))
       }
 
-      // ===== NG検知（自動BAN）=====
+      // ===== NG検知 =====
       if(!isAdmin(g,uid) && g.ngWords.some(w => msg.includes(w))){
-        
         g.bans[uid] = (g.bans[uid] || 0) + 1
         saveDB(db)
 
-        return await client.replyMessage(event.replyToken,
-          txt(`⚠️ NG検知（${g.bans[uid]}回目）`)
+        return await client.replyMessage(
+          event.replyToken,
+          txt(`⚠️ NG検知（${g.bans[uid]}回）`)
         )
       }
 
       let reply = null
 
-      // ===== 通報（メンション対象）=====
+      // ===== 通報（メンション）=====
       if(msg === "通報" && mentions.length > 0){
-
         const target = mentions[0].userId
 
-        g.reports.push({target, time:Date.now()})
+        g.reports.push({target,time:Date.now()})
         g.bans[target] = (g.bans[target] || 0) + 1
 
         saveDB(db)
-
-        reply = txt(`通報受付（対象違反+1）`)
+        reply = txt("通報受付")
       }
 
       // ===== BAN一覧 =====
@@ -99,7 +109,6 @@ app.post("/webhook", line.middleware(config), async (req,res)=>{
         const list = Object.entries(g.bans)
           .map(([id,c])=>`${id}:${c}`)
           .join("\n")
-
         reply = txt(list || "なし")
       }
 
@@ -111,30 +120,44 @@ app.post("/webhook", line.middleware(config), async (req,res)=>{
         reply = txt("追加OK")
       }
 
-      // ===== みくちゃん会話 =====
-      else if(msg.startsWith("みくちゃん")){
+      else if(msg === "NG管理"){
+        reply = txt(g.ngWords.join("\n") || "なし")
+      }
 
+      // ===== 挨拶設定 =====
+      else if(msg.startsWith("挨拶設定:")){
+        g.greeting = msg.replace("挨拶設定:","")
+        saveDB(db)
+        reply = txt("設定OK")
+      }
+
+      else if(msg === "挨拶確認"){
+        reply = txt(g.greeting || "未設定")
+      }
+
+      // ===== みくちゃん挨拶 =====
+      else if(msg.startsWith("みくちゃん")){
         const text = msg.replace("みくちゃん","").trim()
         const pick = arr => arr[Math.floor(Math.random()*arr.length)]
 
-        if(["おはよう"].includes(text)){
+        if(text.includes("おは")){
           reply = txt(pick(["おはよう☀️","今日も頑張ろ😊"]))
         }
-
-        else if(["ありがとう"].includes(text)){
+        else if(text.includes("ありが")){
           reply = txt(pick(["どういたしまして😊","いえいえ✨"]))
         }
-
-        else if(["おつ"].includes(text)){
+        else if(text.includes("おつ")){
           reply = txt(pick(["お疲れ様✨","ゆっくりしてね☕"]))
+        }
+        else if(text.includes("いただきます")){
+          reply = txt(pick(["どうぞ😊","いっぱい食べてね🍽️"]))
+        }
+        else if(text.includes("ごちそう")){
+          reply = txt(pick(["お粗末様😊","また食べてね✨"]))
         }
       }
 
-      // ===== メンション挨拶 =====
-      else if(mentions.some(m=>m.userId===config.channelAccessToken)){
-        reply = txt("呼んだ？😊")
-      }
-
+      // ===== その他は無反応 =====
       if(reply){
         await client.replyMessage(event.replyToken, reply)
       }
@@ -143,7 +166,7 @@ app.post("/webhook", line.middleware(config), async (req,res)=>{
     res.sendStatus(200)
 
   }catch(e){
-    console.log(e)
+    console.log("エラー:",e)
     res.sendStatus(200)
   }
 })
