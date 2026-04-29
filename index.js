@@ -75,13 +75,10 @@ const menu = () => ({
 
         row(btn("管理登録"), btn("副管理登録")),
         row(btn("管理一覧"), btn("NG管理")),
-
         row(btn("NG追加モード"), btn("通報")),
         row(btn("通報ログ"), btn("通報ランキング")),
-
         row(btn("キックモード"), btn("ログ")),
         row(btn("挨拶設定モード"), btn("挨拶確認")),
-
         row(btn("BAN一覧","#D32F2F"), btn("メニュー"))
       ]
     }
@@ -111,51 +108,48 @@ app.post("/webhook", line.middleware(config), async (req,res)=>{
       g.logs.push({text:msg,time:Date.now()})
       if(g.logs.length>50) g.logs.shift()
 
-      // ===== BAN制限 =====
-      if(g.bans[uid] >= 3){
-        return await client.replyMessage(event.replyToken, txt("⚠️ 利用制限中"))
-      }
+      // ===== 管理者は制限対象外 =====
+      if(!isAdmin(g, uid)){
 
-      // ===== 連投検知 =====
-      g.spamCount[uid] = (g.spamCount[uid] || 0) + 1
+        // BAN制限
+        if(g.bans[uid] >= 3){
+          return await client.replyMessage(event.replyToken, txt("⚠️ 利用制限中"))
+        }
 
-      setTimeout(() => { g.spamCount[uid] = 0 }, 10000)
+        // 連投検知
+        g.spamCount[uid] = (g.spamCount[uid] || 0) + 1
+        setTimeout(()=>{ g.spamCount[uid] = 0 },10000)
 
-      if(g.spamCount[uid] >= g.spamLimit){
-        g.bans[uid] = (g.bans[uid] || 0) + 1
-        saveDB(db)
-
-        return await client.replyMessage(
-          event.replyToken,
-          txt(`⚠️ 連投警告（${g.bans[uid]}回）`)
-        )
-      }
-
-      // ===== メンション過多 =====
-      if(mentions.length >= 5){
-        g.bans[uid] = (g.bans[uid] || 0) + 1
-        saveDB(db)
-
-        return await client.replyMessage(
-          event.replyToken,
-          txt(`⚠️ メンション多すぎ`)
-        )
-      }
-
-      // ===== メンション連投 =====
-      if(mentions.length > 0){
-        g.mentionSpam[uid] = (g.mentionSpam[uid] || 0) + 1
-
-        setTimeout(()=>{ g.mentionSpam[uid] = 0 },10000)
-
-        if(g.mentionSpam[uid] >= g.mentionLimit){
+        if(g.spamCount[uid] >= g.spamLimit){
           g.bans[uid] = (g.bans[uid] || 0) + 1
           saveDB(db)
+          return await client.replyMessage(event.replyToken, txt(`⚠️ 連投警告`))
+        }
 
-          return await client.replyMessage(
-            event.replyToken,
-            txt(`⚠️ メンション連投`)
-          )
+        // メンション過多
+        if(mentions.length >= 5){
+          g.bans[uid] = (g.bans[uid] || 0) + 1
+          saveDB(db)
+          return await client.replyMessage(event.replyToken, txt("⚠️ メンション多すぎ"))
+        }
+
+        // メンション連投
+        if(mentions.length > 0){
+          g.mentionSpam[uid] = (g.mentionSpam[uid] || 0) + 1
+          setTimeout(()=>{ g.mentionSpam[uid] = 0 },10000)
+
+          if(g.mentionSpam[uid] >= g.mentionLimit){
+            g.bans[uid] = (g.bans[uid] || 0) + 1
+            saveDB(db)
+            return await client.replyMessage(event.replyToken, txt("⚠️ メンション連投"))
+          }
+        }
+
+        // NG検知
+        if(g.ngWords.some(w => msg.includes(w))){
+          g.bans[uid] = (g.bans[uid] || 0) + 1
+          saveDB(db)
+          return await client.replyMessage(event.replyToken, txt(`⚠️ NG検知（${g.bans[uid]}回）`))
         }
       }
 
@@ -246,6 +240,20 @@ app.post("/webhook", line.middleware(config), async (req,res)=>{
         }
       }
 
+      // ===== 解除（管理者のみ）=====
+      else if(msg==="解除"){
+        if(!isAdmin(g, uid)){
+          reply = txt("⚠️ 管理者のみ")
+        }else if(mentions.length===0){
+          reply = txt("メンションして解除")
+        }else{
+          const target = mentions[0].userId
+          delete g.bans[target]
+          saveDB(db)
+          reply = txt("✅ 解除完了")
+        }
+      }
+
       // ===== ログ =====
       else if(msg==="ログ"){
         reply = txt(g.logs.map(l=>l.text).join("\n") || "なし")
@@ -291,17 +299,6 @@ app.post("/webhook", line.middleware(config), async (req,res)=>{
           saveDB(db)
           reply = txt(`メンション制限:${n}`)
         }
-      }
-
-      // ===== NG検知 =====
-      else if(!isAdmin(g,uid) && g.ngWords.some(w => msg.includes(w))){
-        g.bans[uid]=(g.bans[uid]||0)+1
-        saveDB(db)
-
-        return await client.replyMessage(
-          event.replyToken,
-          txt(`⚠️ NG検知（${g.bans[uid]}回）`)
-        )
       }
 
       if(reply){
