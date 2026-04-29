@@ -28,71 +28,16 @@ const initGroup = (db, gid) => {
     db.groups[gid] = {
       admins:[OWNER_ID],
       subAdmins:[],
-      bans:[],
+      bans:{}, // ← 変更（回数管理）
       ngWords:[],
       reports:[],
-      greeting:"",
-      users:{}
+      greeting:""
     }
   }
 }
 
 const isAdmin = (g, uid)=>
   g.admins.includes(uid) || g.subAdmins.includes(uid)
-
-// ===== UI =====
-const title = t => ({
-  type:"text",
-  text:t,
-  weight:"bold",
-  size:"lg",
-  color:"#1565C0"
-})
-
-const btn = (t, color="#1976D2") => ({
-  type:"button",
-  style:"primary",
-  color,
-  action:{type:"message",label:t,text:t}
-})
-
-const row = (a,b)=>({
-  type:"box",
-  layout:"horizontal",
-  spacing:"sm",
-  contents:[a,b]
-})
-
-function menu(){
-  return {
-    type:"flex",
-    altText:"管理メニュー",
-    contents:{
-      type:"bubble",
-      body:{
-        type:"box",
-        layout:"vertical",
-        spacing:"md",
-        contents:[
-          title("管理メニュー"),
-
-          row(btn("管理登録"), btn("副管理登録")),
-          row(btn("管理一覧"), btn("管理削除")),
-
-          row(btn("BANモード","#D32F2F"), btn("BAN一覧","#D32F2F")),
-
-          row(btn("NG管理","#0288D1"), btn("NG追加モード","#0288D1")),
-
-          row(btn("通報","#F57C00"), btn("通報ログ","#F57C00")),
-
-          row(btn("挨拶設定モード","#0097A7"), btn("挨拶確認","#0097A7")),
-
-          row(btn("キックモード","#7B1FA2"), btn("ログ","#455A64"))
-        ]
-      }
-    }
-  }
-}
 
 const txt = t => ({type:"text",text:t})
 
@@ -103,21 +48,6 @@ app.post("/webhook", line.middleware(config), async (req,res)=>{
     const db = loadDB()
 
     for(const event of req.body.events){
-
-      // ===== 新規参加挨拶 =====
-      if(event.type === "memberJoined"){
-        const gid = event.source.groupId
-        initGroup(db,gid)
-        const g = db.groups[gid]
-
-        if(g.greeting){
-          await client.pushMessage(gid,{
-            type:"text",
-            text:g.greeting
-          })
-        }
-        continue
-      }
 
       if(event.type !== "message") continue
       if(event.message.type !== "text") continue
@@ -130,54 +60,50 @@ app.post("/webhook", line.middleware(config), async (req,res)=>{
 
       const msg = event.message.text
 
+      // ===== メンション取得 =====
+      const mentions = event.message.mention?.mentionees || []
+
+      // ===== BANチェック =====
+      if(g.bans[uid] >= 3){
+        return await client.replyMessage(event.replyToken, txt("⚠️ 利用制限中です"))
+      }
+
+      // ===== NG検知（自動BAN）=====
+      if(!isAdmin(g,uid) && g.ngWords.some(w => msg.includes(w))){
+        
+        g.bans[uid] = (g.bans[uid] || 0) + 1
+        saveDB(db)
+
+        return await client.replyMessage(event.replyToken,
+          txt(`⚠️ NG検知（${g.bans[uid]}回目）`)
+        )
+      }
+
       let reply = null
 
-      // ===== メニュー =====
-      if(msg==="メニュー"){
-        reply = menu()
-      }
+      // ===== 通報（メンション対象）=====
+      if(msg === "通報" && mentions.length > 0){
 
-      // ===== 管理 =====
-      else if(msg==="管理登録"){
-        if(!g.admins.includes(uid)){
-          g.admins.push(uid)
-          saveDB(db)
-        }
-        reply = txt("管理登録OK")
-      }
+        const target = mentions[0].userId
 
-      else if(msg==="副管理登録"){
-        if(!g.subAdmins.includes(uid)){
-          g.subAdmins.push(uid)
-          saveDB(db)
-        }
-        reply = txt("副管理OK")
-      }
+        g.reports.push({target, time:Date.now()})
+        g.bans[target] = (g.bans[target] || 0) + 1
 
-      else if(msg==="管理一覧"){
-        reply = txt([...g.admins,...g.subAdmins].join("\n") || "なし")
-      }
-
-      else if(msg==="管理削除"){
-        g.admins = g.admins.filter(i=>i!==uid)
         saveDB(db)
-        reply = txt("削除OK")
+
+        reply = txt(`通報受付（対象違反+1）`)
       }
 
-      // ===== BAN =====
-      else if(msg==="BANモード"){
-        reply = txt("@名前でBAN")
+      // ===== BAN一覧 =====
+      else if(msg === "BAN一覧"){
+        const list = Object.entries(g.bans)
+          .map(([id,c])=>`${id}:${c}`)
+          .join("\n")
+
+        reply = txt(list || "なし")
       }
 
-      else if(msg==="BAN一覧"){
-        reply = txt(g.bans.join("\n") || "なし")
-      }
-
-      // ===== NG =====
-      else if(msg==="NG追加モード"){
-        reply = txt("NG追加:ワード")
-      }
-
+      // ===== NG追加 =====
       else if(msg.startsWith("NG追加:")){
         const w = msg.replace("NG追加:","")
         g.ngWords.push(w)
@@ -185,88 +111,28 @@ app.post("/webhook", line.middleware(config), async (req,res)=>{
         reply = txt("追加OK")
       }
 
-      else if(msg==="NG管理"){
-        reply = txt(g.ngWords.join("\n") || "なし")
-      }
-
-      // ===== 通報 =====
-      else if(msg==="通報"){
-        g.reports.push({uid,time:Date.now()})
-        saveDB(db)
-        reply = txt("通報完了")
-      }
-
-      else if(msg==="通報ログ"){
-        reply = txt("通報数："+g.reports.length)
-      }
-
-      // ===== 挨拶設定 =====
-      else if(msg==="挨拶設定モード"){
-        reply = txt("挨拶設定:内容")
-      }
-
-      else if(msg.startsWith("挨拶設定:")){
-        g.greeting = msg.replace("挨拶設定:","")
-        saveDB(db)
-        reply = txt("設定OK")
-      }
-
-      else if(msg==="挨拶確認"){
-        reply = txt(g.greeting || "未設定")
-      }
-
-      // ===== キック =====
-      else if(msg==="キックモード"){
-        reply = txt("@名前で警告")
-      }
-
-      // ===== ログ =====
-      else if(msg==="ログ"){
-        reply = txt(`通報:${g.reports.length} / NG:${g.ngWords.length}`)
-      }
-
-      // ===== みくちゃん挨拶（ランダム）=====
+      // ===== みくちゃん会話 =====
       else if(msg.startsWith("みくちゃん")){
 
         const text = msg.replace("みくちゃん","").trim()
-        const pick = (arr)=>arr[Math.floor(Math.random()*arr.length)]
+        const pick = arr => arr[Math.floor(Math.random()*arr.length)]
 
-        if(["おはよう","おはよ"].includes(text)){
-          reply = txt(pick(["おはようございます☀️","おはよー！😊","今日もいい日になりますように✨"]))
+        if(["おはよう"].includes(text)){
+          reply = txt(pick(["おはよう☀️","今日も頑張ろ😊"]))
         }
 
-        else if(["こんにちは","こんちは"].includes(text)){
-          reply = txt(pick(["こんにちは😊","元気？✨","今日も頑張ろう💪"]))
+        else if(["ありがとう"].includes(text)){
+          reply = txt(pick(["どういたしまして😊","いえいえ✨"]))
         }
 
-        else if(["こんばんは","こんば"].includes(text)){
-          reply = txt(pick(["こんばんは🌙","今日もお疲れ様😊","ゆっくりしてね✨"]))
-        }
-
-        else if(["おやすみ","おやすみなさい"].includes(text)){
-          reply = txt(pick(["おやすみなさい💤","いい夢見てね✨","ゆっくり休んでね😊"]))
-        }
-
-        else if(["ありがとう","ありがと","あり"].includes(text)){
-          reply = txt(pick(["どういたしまして😊","いえいえ✨","こちらこそありがとう😊"]))
-        }
-
-        else if(["おつ","お疲れ","おつかれ","お疲れ様","お疲れさま"].includes(text)){
-          reply = txt(pick(["お疲れ様です✨","今日もよく頑張ったね😊","ゆっくりしてね☕"]))
-        }
-
-        else if(["いただきます"].includes(text)){
-          reply = txt(pick(["どうぞ召し上がれ😊","たくさん食べてね🍽️","美味しく食べてね✨"]))
-        }
-
-        else if(["ごちそうさま","ご馳走様"].includes(text)){
-          reply = txt(pick(["お粗末様でした😊","満足できたかな？✨","また食べようね🍽️"]))
+        else if(["おつ"].includes(text)){
+          reply = txt(pick(["お疲れ様✨","ゆっくりしてね☕"]))
         }
       }
 
-      // ===== 完全無視 =====
-      else{
-        reply = null
+      // ===== メンション挨拶 =====
+      else if(mentions.some(m=>m.userId===config.channelAccessToken)){
+        reply = txt("呼んだ？😊")
       }
 
       if(reply){
@@ -277,7 +143,7 @@ app.post("/webhook", line.middleware(config), async (req,res)=>{
     res.sendStatus(200)
 
   }catch(e){
-    console.log("エラー:",e)
+    console.log(e)
     res.sendStatus(200)
   }
 })
