@@ -42,34 +42,46 @@ const isAdmin = (g, uid)=>
 
 const txt = t => ({type:"text",text:t})
 
-// ===== メニュー =====
-const menu = () => ({
-  type: "flex",
-  altText: "管理メニュー",
-  contents: {
-    type: "bubble",
-    body: {
-      type: "box",
-      layout: "vertical",
-      spacing: "sm",
-      contents: [
-        { type: "text", text: "管理メニュー", weight: "bold", size: "lg" },
+// ===== UI =====
+const btn = (t, color="#1976D2")=>({
+  type:"button",
+  style:"primary",
+  color,
+  action:{type:"message",label:t,text:t}
+})
 
-        btn("管理登録"), btn("副管理登録"), btn("管理一覧"),
-        btn("NG管理"), btn("NG追加モード"),
-        btn("通報"), btn("通報ログ"), btn("通報ランキング"),
-        btn("キックモード"), btn("ログ"),
-        btn("挨拶設定モード"), btn("挨拶確認"),
-        btn("BAN一覧")
+const row = (a,b)=>({
+  type:"box",
+  layout:"horizontal",
+  spacing:"sm",
+  contents:[a,b]
+})
+
+const menu = () => ({
+  type:"flex",
+  altText:"管理メニュー",
+  contents:{
+    type:"bubble",
+    body:{
+      type:"box",
+      layout:"vertical",
+      spacing:"md",
+      contents:[
+        { type:"text", text:"管理メニュー", weight:"bold", size:"lg", color:"#1565C0" },
+
+        row(btn("管理登録"), btn("副管理登録")),
+        row(btn("管理一覧"), btn("NG管理")),
+
+        row(btn("NG追加モード"), btn("通報")),
+        row(btn("通報ログ"), btn("通報ランキング")),
+
+        row(btn("キックモード"), btn("ログ")),
+        row(btn("挨拶設定モード"), btn("挨拶確認")),
+
+        row(btn("BAN一覧","#D32F2F"), btn("メニュー"))
       ]
     }
   }
-})
-
-const btn = (t)=>({
-  type:"button",
-  style:"primary",
-  action:{type:"message",label:t,text:t}
 })
 
 // ===== MAIN =====
@@ -88,10 +100,10 @@ app.post("/webhook", line.middleware(config), async (req,res)=>{
       initGroup(db,gid)
       const g = db.groups[gid]
 
-      const msg = event.message.text
+      const msg = event.message.text.trim()
       const mentions = event.message.mention?.mentionees || []
 
-      // ===== ログ保存 =====
+      // ===== ログ =====
       g.logs.push({text:msg,time:Date.now()})
       if(g.logs.length>50) g.logs.shift()
 
@@ -102,16 +114,13 @@ app.post("/webhook", line.middleware(config), async (req,res)=>{
 
       let reply = null
 
-      // =========================
-      // 🔥 コマンド処理（最優先）
-      // =========================
-
-      if(msg === "メニュー"){
+      // ===== メニュー =====
+      if(msg==="メニュー"){
         reply = menu()
       }
 
-      // 管理
-      else if(msg === "管理登録"){
+      // ===== 管理 =====
+      else if(msg==="管理登録"){
         if(!g.admins.includes(uid)){
           g.admins.push(uid)
           saveDB(db)
@@ -119,7 +128,7 @@ app.post("/webhook", line.middleware(config), async (req,res)=>{
         reply = txt("管理登録OK")
       }
 
-      else if(msg === "副管理登録"){
+      else if(msg==="副管理登録"){
         if(!g.subAdmins.includes(uid)){
           g.subAdmins.push(uid)
           saveDB(db)
@@ -127,12 +136,12 @@ app.post("/webhook", line.middleware(config), async (req,res)=>{
         reply = txt("副管理登録OK")
       }
 
-      else if(msg === "管理一覧"){
+      else if(msg==="管理一覧"){
         reply = txt([...g.admins,...g.subAdmins].join("\n") || "なし")
       }
 
-      // NG
-      else if(msg === "NG追加モード"){
+      // ===== NG =====
+      else if(msg==="NG追加モード"){
         reply = txt("NG追加:ワード")
       }
 
@@ -143,28 +152,28 @@ app.post("/webhook", line.middleware(config), async (req,res)=>{
         reply = txt("追加OK")
       }
 
-      else if(msg === "NG管理"){
+      else if(msg==="NG管理"){
         reply = txt(g.ngWords.join("\n") || "なし")
       }
 
-      // 通報
-      else if(msg === "通報"){
-        if(mentions.length === 0){
-          reply = txt("メンションして通報してください")
+      // ===== 通報 =====
+      else if(msg==="通報"){
+        if(mentions.length===0){
+          reply = txt("メンションして通報")
         }else{
           const target = mentions[0].userId
-          g.bans[target] = (g.bans[target]||0)+1
+          g.bans[target]=(g.bans[target]||0)+1
           g.reports.push({target,time:Date.now()})
           saveDB(db)
           reply = txt("通報受付")
         }
       }
 
-      else if(msg === "通報ログ"){
+      else if(msg==="通報ログ"){
         reply = txt(g.reports.map(r=>r.target).join("\n") || "なし")
       }
 
-      else if(msg === "通報ランキング"){
+      else if(msg==="通報ランキング"){
         const count={}
         g.reports.forEach(r=>{
           count[r.target]=(count[r.target]||0)+1
@@ -176,29 +185,29 @@ app.post("/webhook", line.middleware(config), async (req,res)=>{
         )
       }
 
-      // キック
-      else if(msg === "キックモード"){
+      // ===== キック =====
+      else if(msg==="キックモード"){
         reply = txt("メンションして『キック』")
       }
 
-      else if(msg === "キック"){
-        if(mentions.length === 0){
+      else if(msg==="キック"){
+        if(mentions.length===0){
           reply = txt("メンション必須")
         }else{
           const target = mentions[0].userId
-          g.bans[target] = 999
+          g.bans[target]=999
           saveDB(db)
           reply = txt("キック実行")
         }
       }
 
-      // ログ
-      else if(msg === "ログ"){
+      // ===== ログ =====
+      else if(msg==="ログ"){
         reply = txt(g.logs.map(l=>l.text).join("\n") || "なし")
       }
 
-      // 挨拶
-      else if(msg === "挨拶設定モード"){
+      // ===== 挨拶 =====
+      else if(msg==="挨拶設定モード"){
         reply = txt("挨拶設定:内容")
       }
 
@@ -208,24 +217,21 @@ app.post("/webhook", line.middleware(config), async (req,res)=>{
         reply = txt("設定OK")
       }
 
-      else if(msg === "挨拶確認"){
+      else if(msg==="挨拶確認"){
         reply = txt(g.greeting || "未設定")
       }
 
-      // BAN一覧
-      else if(msg === "BAN一覧"){
+      // ===== BAN一覧 =====
+      else if(msg==="BAN一覧"){
         reply = txt(
           Object.entries(g.bans)
           .map(([id,c])=>`${id}:${c}`).join("\n") || "なし"
         )
       }
 
-      // =========================
-      // 通常処理（最後）
-      // =========================
-
+      // ===== NG検知 =====
       else if(!isAdmin(g,uid) && g.ngWords.some(w => msg.includes(w))){
-        g.bans[uid] = (g.bans[uid]||0)+1
+        g.bans[uid]=(g.bans[uid]||0)+1
         saveDB(db)
         return await client.replyMessage(
           event.replyToken,
@@ -233,11 +239,6 @@ app.post("/webhook", line.middleware(config), async (req,res)=>{
         )
       }
 
-      else if(msg.startsWith("みくちゃん")){
-        reply = txt("なに？😊")
-      }
-
-      // ===== 返信 =====
       if(reply){
         await client.replyMessage(event.replyToken, reply)
       }
