@@ -32,7 +32,11 @@ const initGroup = (db, gid) => {
       ngWords:[],
       reports:[],
       logs:[],
-      greeting:""
+      greeting:"",
+      spamCount:{},
+      spamLimit:3,
+      mentionSpam:{},
+      mentionLimit:3
     }
   }
 }
@@ -112,12 +116,53 @@ app.post("/webhook", line.middleware(config), async (req,res)=>{
         return await client.replyMessage(event.replyToken, txt("⚠️ 利用制限中"))
       }
 
+      // ===== 連投検知 =====
+      g.spamCount[uid] = (g.spamCount[uid] || 0) + 1
+
+      setTimeout(() => { g.spamCount[uid] = 0 }, 10000)
+
+      if(g.spamCount[uid] >= g.spamLimit){
+        g.bans[uid] = (g.bans[uid] || 0) + 1
+        saveDB(db)
+
+        return await client.replyMessage(
+          event.replyToken,
+          txt(`⚠️ 連投警告（${g.bans[uid]}回）`)
+        )
+      }
+
+      // ===== メンション過多 =====
+      if(mentions.length >= 5){
+        g.bans[uid] = (g.bans[uid] || 0) + 1
+        saveDB(db)
+
+        return await client.replyMessage(
+          event.replyToken,
+          txt(`⚠️ メンション多すぎ`)
+        )
+      }
+
+      // ===== メンション連投 =====
+      if(mentions.length > 0){
+        g.mentionSpam[uid] = (g.mentionSpam[uid] || 0) + 1
+
+        setTimeout(()=>{ g.mentionSpam[uid] = 0 },10000)
+
+        if(g.mentionSpam[uid] >= g.mentionLimit){
+          g.bans[uid] = (g.bans[uid] || 0) + 1
+          saveDB(db)
+
+          return await client.replyMessage(
+            event.replyToken,
+            txt(`⚠️ メンション連投`)
+          )
+        }
+      }
+
       let reply = null
 
       // ===== メニュー =====
-      if(msg==="メニュー"){
-        reply = menu()
-      }
+      if(msg==="メニュー") reply = menu()
 
       // ===== 管理 =====
       else if(msg==="管理登録"){
@@ -229,10 +274,30 @@ app.post("/webhook", line.middleware(config), async (req,res)=>{
         )
       }
 
+      // ===== 設定変更 =====
+      else if(msg.startsWith("連投設定:")){
+        const n = parseInt(msg.replace("連投設定:",""))
+        if(!isNaN(n)){
+          g.spamLimit = n
+          saveDB(db)
+          reply = txt(`連投制限:${n}`)
+        }
+      }
+
+      else if(msg.startsWith("メンション設定:")){
+        const n = parseInt(msg.replace("メンション設定:",""))
+        if(!isNaN(n)){
+          g.mentionLimit = n
+          saveDB(db)
+          reply = txt(`メンション制限:${n}`)
+        }
+      }
+
       // ===== NG検知 =====
       else if(!isAdmin(g,uid) && g.ngWords.some(w => msg.includes(w))){
         g.bans[uid]=(g.bans[uid]||0)+1
         saveDB(db)
+
         return await client.replyMessage(
           event.replyToken,
           txt(`⚠️ NG検知（${g.bans[uid]}回）`)
