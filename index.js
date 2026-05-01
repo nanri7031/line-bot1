@@ -12,13 +12,16 @@ const config = {
 const client = new line.Client(config)
 const OWNER_ID = "U1a1aca9e44466f8cb05003d7dc86fee0"
 
+// ===== 永続化パス =====
+const DB_PATH = "/mnt/data/db.json"
+
 // ===== DB =====
 const loadDB = () => {
-  try { return JSON.parse(fs.readFileSync("db.json")) }
+  try { return JSON.parse(fs.readFileSync(DB_PATH)) }
   catch { return { groups: {} } }
 }
 const saveDB = (db) => {
-  fs.writeFileSync("db.json", JSON.stringify(db,null,2))
+  fs.writeFileSync(DB_PATH, JSON.stringify(db,null,2))
 }
 
 const initGroup = (db, gid) => {
@@ -110,6 +113,10 @@ app.post("/webhook", line.middleware(config), async (req,res)=>{
       let msg = event.message.text.trim()
       const mentions = event.message.mention?.mentionees || []
 
+      // ===== ログ =====
+      g.logs.push({text:msg,time:Date.now()})
+      if(g.logs.length>30) g.logs.shift()
+
       // ===== 連投制御 =====
       if(!isAdmin(g, uid)){
         g.spamCount[uid]=(g.spamCount[uid]||0)+1
@@ -120,6 +127,12 @@ app.post("/webhook", line.middleware(config), async (req,res)=>{
           saveDB(db)
           return client.replyMessage(event.replyToken, txt("⚠️ 連投警告"))
         }
+
+        if(g.ngWords.some(w => msg.includes(w))){
+          g.bans[uid]++
+          saveDB(db)
+          return client.replyMessage(event.replyToken, txt("⚠️ NG検知"))
+        }
       }
 
       let reply = null
@@ -127,28 +140,34 @@ app.post("/webhook", line.middleware(config), async (req,res)=>{
       // ===== メニュー =====
       if(msg.includes("メニュー")) reply = menu()
 
-      // ===== 設定（最優先）=====
+      // ===== 設定 =====
       else if(msg.startsWith("連投設定:")){
-        const n = parseInt(msg.replace("連投設定:",""))
-        if(!isNaN(n)){
-          g.spamLimit = n
-          saveDB(db)
-          reply = txt(`連投制限:${n}`)
+        if(!isAdmin(g,uid)) reply=txt("管理者のみ")
+        else{
+          const n = parseInt(msg.replace("連投設定:",""))
+          if(!isNaN(n)){
+            g.spamLimit=n
+            saveDB(db)
+            reply=txt(`連投制限:${n}`)
+          }
         }
       }
 
       else if(msg.startsWith("メンション設定:")){
-        const n = parseInt(msg.replace("メンション設定:",""))
-        if(!isNaN(n)){
-          g.mentionLimit = n
-          saveDB(db)
-          reply = txt(`メンション制限:${n}`)
+        if(!isAdmin(g,uid)) reply=txt("管理者のみ")
+        else{
+          const n = parseInt(msg.replace("メンション設定:",""))
+          if(!isNaN(n)){
+            g.mentionLimit=n
+            saveDB(db)
+            reply=txt(`メンション制限:${n}`)
+          }
         }
       }
 
       // ===== 管理 =====
       else if(msg.startsWith("管理追加")){
-        if(uid !== OWNER_ID) reply=txt("オーナーのみ")
+        if(uid!==OWNER_ID) reply=txt("オーナーのみ")
         else if(!mentions.length) reply=txt("メンションして")
         else{
           g.admins.push(mentions[0].userId)
@@ -158,12 +177,41 @@ app.post("/webhook", line.middleware(config), async (req,res)=>{
       }
 
       else if(msg.startsWith("管理削除")){
-        if(uid !== OWNER_ID) reply=txt("オーナーのみ")
+        if(uid!==OWNER_ID) reply=txt("オーナーのみ")
         else{
           g.admins = g.admins.filter(id=>id!==mentions[0]?.userId)
           saveDB(db)
           reply=txt("管理削除")
         }
+      }
+
+      // ===== 副管理 =====
+      else if(msg.includes("副管理登録")){
+        if(!isAdmin(g,uid)) reply=txt("管理者のみ")
+        else if(!mentions.length) reply=txt("メンションして")
+        else{
+          g.subAdmins.push(mentions[0].userId)
+          saveDB(db)
+          reply=txt("副管理登録")
+        }
+      }
+
+      else if(msg.includes("副管理削除")){
+        if(!isAdmin(g,uid)) reply=txt("管理者のみ")
+        else{
+          g.subAdmins = g.subAdmins.filter(id=>id!==mentions[0]?.userId)
+          saveDB(db)
+          reply=txt("副管理削除")
+        }
+      }
+
+      else if(msg.includes("管理一覧")){
+        const list = await Promise.all(
+          [...g.admins,...g.subAdmins].map(async id=>{
+            return await getName(gid,id)
+          })
+        )
+        reply = txt(list.join("\n")||"なし")
       }
 
       // ===== 通報 =====
@@ -230,14 +278,15 @@ app.post("/webhook", line.middleware(config), async (req,res)=>{
         reply = txt(list.join("\n")||"なし")
       }
 
-      // ===== 管理一覧 =====
-      else if(msg.includes("管理一覧")){
-        const list = await Promise.all(
-          [...g.admins,...g.subAdmins].map(async id=>{
-            return await getName(gid,id)
-          })
-        )
-        reply = txt(list.join("\n")||"なし")
+      // ===== NG =====
+      else if(msg.startsWith("NG追加:")){
+        g.ngWords.push(msg.replace("NG追加:",""))
+        saveDB(db)
+        reply=txt("追加OK")
+      }
+
+      else if(msg.includes("NG管理")){
+        reply=txt(g.ngWords.join("\n")||"なし")
       }
 
       // ===== ログ =====
