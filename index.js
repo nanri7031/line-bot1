@@ -1,112 +1,116 @@
-import express from 'express'
-import * as line from '@line/bot-sdk'
-import { google } from 'googleapis'
+import express from "express";
+import line from "@line/bot-sdk";
+import { google } from "googleapis";
 
 // ===== LINE設定 =====
 const config = {
   channelAccessToken: process.env.CHANNEL_ACCESS_TOKEN,
   channelSecret: process.env.CHANNEL_SECRET,
-}
+};
+
+// ===== 管理者ID（自分 + 追加OK）=====
+const ADMIN_IDS = [
+  "U1a1aca9e44466f8cb05003d7dc86fee0", // ←あなた
+];
 
 // ===== Google Sheets設定 =====
-const SPREADSHEET_ID = process.env.SPREADSHEET_ID
+const SPREADSHEET_ID = "1ZgDYtjmF0eNSab654gGLrfl11i_jmaVQW2WmaVRV1Lw";
 
+// 🔥 JSONはそのまま（改行OK）
 const auth = new google.auth.GoogleAuth({
   credentials: JSON.parse(process.env.GOOGLE_CREDENTIALS),
-  scopes: ['https://www.googleapis.com/auth/spreadsheets'],
-})
+  scopes: ["https://www.googleapis.com/auth/spreadsheets"],
+});
 
-const sheets = google.sheets({ version: 'v4', auth })
+const sheets = google.sheets({ version: "v4", auth });
 
-// ===== 管理者ID =====
-const ADMIN_IDS = [
-  "U1a1aca9e44466f8cb05003d7dc86fee0"
-]
+// ===== LINEクライアント =====
+const client = new line.Client(config);
 
 // ===== Express =====
-const app = express()
-app.use(express.json())
+const app = express();
 
-const client = new line.Client(config)
+app.get("/", (req, res) => {
+  res.send("BOT起動中");
+});
 
 // ===== Webhook =====
-app.post('/webhook', line.middleware(config), async (req, res) => {
-  Promise
-    .all(req.body.events.map(handleEvent))
-    .then(() => res.json({ success: true }))
-    .catch(err => {
-      console.error(err)
-      res.status(500).end()
-    })
-})
+app.post("/webhook", line.middleware(config), async (req, res) => {
+  try {
+    const events = req.body.events;
+    await Promise.all(events.map(handleEvent));
+    res.json({ status: "ok" });
+  } catch (err) {
+    console.error(err);
+    res.status(500).end();
+  }
+});
 
-// ===== メイン処理 =====
+// ===== イベント処理 =====
 async function handleEvent(event) {
-  if (event.type !== 'message' || event.message.type !== 'text') {
-    return null
-  }
+  if (event.type !== "message" || event.message.type !== "text") return;
 
-  const text = event.message.text
-  const userId = event.source.userId
-  const groupId = event.source.groupId || "個人"
+  const userId = event.source.userId;
+  const text = event.message.text;
 
-  // ===== BOT確認 =====
-  if (text === '確認') {
+  // ===== BOT確認コマンド =====
+  if (text === "ping") {
     return client.replyMessage(event.replyToken, {
-      type: 'text',
-      text: 'BOT正常🔥'
-    })
+      type: "text",
+      text: "pong（BOT動いてる）",
+    });
   }
+
+  // ===== 管理者チェック =====
+  const isAdmin = ADMIN_IDS.includes(userId);
 
   // ===== 管理者追加 =====
-  if (text.startsWith('管理追加')) {
-    if (!ADMIN_IDS.includes(userId)) {
-      return client.replyMessage(event.replyToken, {
-        type: 'text',
-        text: '権限なし'
-      })
-    }
-
-    const newId = text.replace('管理追加', '').trim()
-
-    if (!newId) {
-      return client.replyMessage(event.replyToken, {
-        type: 'text',
-        text: 'ID指定して'
-      })
-    }
-
-    ADMIN_IDS.push(newId)
+  if (text.startsWith("admin add ") && isAdmin) {
+    const newId = text.replace("admin add ", "").trim();
+    ADMIN_IDS.push(newId);
 
     return client.replyMessage(event.replyToken, {
-      type: 'text',
-      text: `追加完了: ${newId}`
-    })
+      type: "text",
+      text: `管理者追加: ${newId}`,
+    });
   }
 
-  // ===== 管理者一覧 =====
-  if (text === '管理一覧') {
+  // ===== 管理者確認 =====
+  if (text === "admin list") {
     return client.replyMessage(event.replyToken, {
-      type: 'text',
-      text: ADMIN_IDS.join('\n')
-    })
+      type: "text",
+      text: ADMIN_IDS.join("\n"),
+    });
   }
 
-  // ===== データ保存 =====
-  await sheets.spreadsheets.values.append({
-    spreadsheetId: SPREADSHEET_ID,
-    range: 'A:B',
-    valueInputOption: 'RAW',
-    requestBody: {
-      values: [[groupId, text]]
-    }
-  })
+  // ===== Sheetsに保存 =====
+  await saveToSheet(event);
 
-  return null
+  return client.replyMessage(event.replyToken, {
+    type: "text",
+    text: "保存した",
+  });
 }
 
-// ===== サーバー起動 =====
-const PORT = process.env.PORT || 3000
+// ===== Sheets書き込み =====
+async function saveToSheet(event) {
+  const userId = event.source.userId;
+  const groupId = event.source.groupId || "個チャ";
+  const text = event.message.text;
+  const time = new Date().toLocaleString("ja-JP");
+
+  await sheets.spreadsheets.values.append({
+    spreadsheetId: SPREADSHEET_ID,
+    range: "Sheet1!A:D",
+    valueInputOption: "RAW",
+    requestBody: {
+      values: [[time, userId, groupId, text]],
+    },
+  });
+}
+
+// ===== 起動 =====
+const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  console.log(`起動中: ${PORT}`)
-})
+  console.log("🚀 Server running on " + PORT);
+});
