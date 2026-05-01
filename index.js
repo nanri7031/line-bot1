@@ -2,7 +2,7 @@ import express from "express";
 import * as line from "@line/bot-sdk";
 import { google } from "googleapis";
 
-// ===== LINE =====
+// ===== LINE設定 =====
 const config = {
   channelAccessToken: process.env.CHANNEL_ACCESS_TOKEN,
   channelSecret: process.env.CHANNEL_SECRET,
@@ -14,12 +14,11 @@ let SUB_ADMINS = [];
 
 // ===== システム =====
 let BAN_USERS = [];
-let REPORT_COUNT = {};
-let SPAM_COUNT = {};
-let LAST_MESSAGE = {};
 let NG_WORDS = ["死ね", "荒らし"];
 let GREETING = true;
 let SPAM_LIMIT = 5;
+let MESSAGE_LOG = {};
+let REPORT_COUNT = {};
 
 // ===== Sheets =====
 const SPREADSHEET_ID = "1ZgDYtjmF0eNSab654gGLrfl11i_jmaVQW2WmaVRV1Lw";
@@ -37,6 +36,7 @@ const app = express();
 
 app.get("/", (req, res) => res.send("BOT起動中"));
 
+// ===== Webhook =====
 app.post("/webhook", line.middleware(config), async (req, res) => {
   await Promise.all(req.body.events.map(handleEvent));
   res.json({ ok: true });
@@ -44,6 +44,35 @@ app.post("/webhook", line.middleware(config), async (req, res) => {
 
 // ===== メイン処理 =====
 async function handleEvent(event) {
+
+  // ===== メニュー（最優先に置く）=====
+  if (event.type === "message" && event.message.type === "text") {
+    const text = event.message.text;
+
+    if (text === "menu") {
+      return client.replyMessage(event.replyToken, {
+        type: "flex",
+        altText: "管理メニュー",
+        contents: {
+          type: "bubble",
+          body: {
+            type: "box",
+            layout: "vertical",
+            spacing: "md",
+            contents: [
+              button("管理一覧", "admin list"),
+              button("副管理一覧", "sub list"),
+              button("BAN一覧", "ban list"),
+              button("NG一覧", "ng list"),
+              button("状態確認", "ping")
+            ]
+          }
+        }
+      });
+    }
+  }
+
+  // ===== 通常処理 =====
   if (event.type !== "message" || event.message.type !== "text") return;
 
   const text = event.message.text;
@@ -57,26 +86,25 @@ async function handleEvent(event) {
   if (BAN_USERS.includes(userId)) return;
 
   // ===== 稼働確認 =====
-  if (text === "ping") return reply(event, "pong（正常稼働中）");
+  if (text === "ping") return reply(event, "pong（稼働中）");
 
   // ===== 挨拶 =====
-  if (GREETING && (text === "こんにちは" || text === "おはよう")) {
+  if (GREETING && ["こんにちは", "おはよう"].includes(text)) {
     const msg = ["よろしく！", "どうも！", "いらっしゃい！"];
     return reply(event, msg[Math.floor(Math.random() * msg.length)]);
   }
 
-  // ===== 連投制限 =====
-  const now = Date.now();
-  if (!LAST_MESSAGE[userId]) LAST_MESSAGE[userId] = [];
-  LAST_MESSAGE[userId].push(now);
-  LAST_MESSAGE[userId] = LAST_MESSAGE[userId].filter(t => now - t < 10000);
+  // ===== 連投 =====
+  if (!MESSAGE_LOG[userId]) MESSAGE_LOG[userId] = [];
+  MESSAGE_LOG[userId].push(Date.now());
+  MESSAGE_LOG[userId] = MESSAGE_LOG[userId].filter(t => Date.now() - t < 10000);
 
-  if (LAST_MESSAGE[userId].length > SPAM_LIMIT) {
+  if (MESSAGE_LOG[userId].length > SPAM_LIMIT) {
     BAN_USERS.push(userId);
     return reply(event, "⚠️ 連投BAN");
   }
 
-  // ===== NGワード =====
+  // ===== NG =====
   for (let w of NG_WORDS) {
     if (text.includes(w)) {
       BAN_USERS.push(userId);
@@ -86,12 +114,12 @@ async function handleEvent(event) {
 
   // ===== 通報 =====
   if (text.startsWith("通報 ")) {
-    const target = text.replace("通報 ", "").trim();
-    REPORT_COUNT[target] = (REPORT_COUNT[target] || 0) + 1;
+    const id = text.replace("通報 ", "").trim();
+    REPORT_COUNT[id] = (REPORT_COUNT[id] || 0) + 1;
 
-    if (REPORT_COUNT[target] >= 3) {
-      BAN_USERS.push(target);
-      return reply(event, "🚫 通報によりBAN");
+    if (REPORT_COUNT[id] >= 3) {
+      BAN_USERS.push(id);
+      return reply(event, "🚫 通報BAN");
     }
     return reply(event, "通報受付");
   }
@@ -126,8 +154,7 @@ async function handleEvent(event) {
   if (text === "ban list") return reply(event, BAN_USERS.join("\n"));
 
   if (text.startsWith("unban ") && (isAdmin || isSub)) {
-    const id = text.replace("unban ", "").trim();
-    BAN_USERS = BAN_USERS.filter(u => u !== id);
+    BAN_USERS = BAN_USERS.filter(u => u !== text.replace("unban ", "").trim());
     return reply(event, "解除");
   }
 
@@ -137,11 +164,9 @@ async function handleEvent(event) {
     return reply(event, "NG追加");
   }
 
-  // ===== 挨拶切替 =====
-  if (text === "greet on") GREETING = true;
-  if (text === "greet off") GREETING = false;
+  if (text === "ng list") return reply(event, NG_WORDS.join(", "));
 
-  // ===== ログ保存 =====
+  // ===== 保存 =====
   await sheets.spreadsheets.values.append({
     spreadsheetId: SPREADSHEET_ID,
     range: "Sheet1!A:D",
@@ -154,6 +179,16 @@ async function handleEvent(event) {
   return reply(event, "OK");
 }
 
+// ===== ボタン =====
+function button(label, text) {
+  return {
+    type: "button",
+    style: "primary",
+    color: "#1E90FF",
+    action: { type: "message", label, text }
+  };
+}
+
 // ===== 返信 =====
 function reply(event, text) {
   return client.replyMessage(event.replyToken, {
@@ -164,6 +199,4 @@ function reply(event, text) {
 
 // ===== 起動 =====
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-  console.log("🚀 最強BOT起動");
-});
+app.listen(PORT, () => console.log("🚀 最強BOT起動"));
