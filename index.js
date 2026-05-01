@@ -15,15 +15,20 @@ let SUB_ADMINS = [];
 // ===== システム =====
 let BAN_USERS = [];
 let NG_WORDS = ["死ね", "荒らし"];
-let GREETING_ON = true;
-let JOIN_ON = true;
 let SPAM_LIMIT = 5;
-
 let MESSAGE_LOG = {};
 let REPORT_COUNT = {};
 
+// ===== 挨拶 =====
+let GREETINGS = {
+  "こんにちは": ["こんにちは！", "どうも！"],
+  "おはよう": ["おはよう！"],
+  "こんばんは": ["こんばんは！"]
+};
+
 // ===== 入室挨拶 =====
 let JOIN_MESSAGES = ["ようこそ！"];
+let JOIN_ON = true;
 
 // ===== Sheets =====
 const SPREADSHEET_ID = "1ZgDYtjmF0eNSab654gGLrfl11i_jmaVQW2WmaVRV1Lw";
@@ -95,7 +100,7 @@ async function handleEvent(event) {
   // ===== BAN無反応 =====
   if (BAN_USERS.includes(userId)) return;
 
-  // ===== メニュー =====
+  // ===== menu =====
   if (text === "menu") {
     return client.replyMessage(event.replyToken, {
       type: "flex",
@@ -118,10 +123,16 @@ async function handleEvent(event) {
     });
   }
 
-  // ===== 確認 =====
+  // ===== ping =====
   if (text === "ping") return reply(event, "pong（稼働中）");
 
-  // ===== 連投 =====
+  // ===== 通常挨拶 =====
+  if (GREETINGS[text]) {
+    const arr = GREETINGS[text];
+    return reply(event, arr[Math.floor(Math.random() * arr.length)]);
+  }
+
+  // ===== 連投検知 =====
   if (!MESSAGE_LOG[userId]) MESSAGE_LOG[userId] = [];
   MESSAGE_LOG[userId].push(Date.now());
   MESSAGE_LOG[userId] = MESSAGE_LOG[userId].filter(t => Date.now() - t < 10000);
@@ -131,7 +142,7 @@ async function handleEvent(event) {
     return reply(event, "⚠️ 連投BAN");
   }
 
-  // ===== NG =====
+  // ===== NGワード =====
   for (let w of NG_WORDS) {
     if (text.includes(w)) {
       BAN_USERS.push(userId);
@@ -177,7 +188,7 @@ async function handleEvent(event) {
 
   if (text === "sub list") return reply(event, SUB_ADMINS.join("\n"));
 
-  // ===== BAN管理 =====
+  // ===== BAN =====
   if (text === "ban list") return reply(event, BAN_USERS.join("\n"));
 
   if (text.startsWith("unban ") && (isAdmin || isSub)) {
@@ -241,4 +252,4 @@ function reply(event, text) {
 
 // ===== 起動 =====
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log("🚀 完全版BOT起動"));
+app.listen(PORT, () => console.log("🚀 最終完全版BOT起動"));
