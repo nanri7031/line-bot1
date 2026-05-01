@@ -2,62 +2,166 @@ import express from "express";
 import * as line from "@line/bot-sdk";
 import { google } from "googleapis";
 
-const app = express();
-
 // ===== LINE =====
-const client = new line.Client({
+const config = {
   channelAccessToken: process.env.CHANNEL_ACCESS_TOKEN,
-  channelSecret: process.env.CHANNEL_SECRET
-});
+  channelSecret: process.env.CHANNEL_SECRET,
+};
 
 // ===== Sheets =====
+const SPREADSHEET_ID = "1ZgDYtjmF0eNSab654gGLrfl11i_jmaVQW2WmaVRV1Lw";
+
 const auth = new google.auth.GoogleAuth({
   credentials: JSON.parse(process.env.GOOGLE_CREDENTIALS),
-  scopes: ["https://www.googleapis.com/auth/spreadsheets"]
+  scopes: ["https://www.googleapis.com/auth/spreadsheets"],
 });
-
 const sheets = google.sheets({ version: "v4", auth });
-const SPREADSHEET_ID = process.env.SPREADSHEET_ID;
 
-// ===== ヘルパー =====
-async function get(range){
-  const res = await sheets.spreadsheets.values.get({
-    spreadsheetId: SPREADSHEET_ID,
-    range
-  });
-  return res.data.values || [];
-}
+// ===== LINE client =====
+const client = new line.Client(config);
+const app = express();
 
-async function add(range, val){
-  await sheets.spreadsheets.values.append({
-    spreadsheetId: SPREADSHEET_ID,
-    range,
-    valueInputOption:"RAW",
-    requestBody:{ values:val }
-  });
-}
-
-async function set(range, val){
-  await sheets.spreadsheets.values.update({
-    spreadsheetId: SPREADSHEET_ID,
-    range,
-    valueInputOption:"RAW",
-    requestBody:{ values:val }
-  });
-}
-
-// ===== Webhook =====
-app.use("/webhook", line.middleware({
-  channelSecret: process.env.CHANNEL_SECRET
-}));
-
-app.post("/webhook", async (req,res)=>{
-  await Promise.all(req.body.events.map(handleEvent));
-  res.sendStatus(200);
+// ===== webhook =====
+app.post("/webhook", line.middleware(config), (req, res) => {
+  Promise.all(req.body.events.map(handleEvent))
+    .then(() => res.json({ ok: true }))
+    .catch(console.error);
 });
 
-// ===== メニューUI =====
-function menu(){
+app.get("/", (req, res) => res.send("OK"));
+
+// ===== メイン =====
+async function handleEvent(event) {
+  console.log("event:", JSON.stringify(event));
+
+  const userId = event.source.userId;
+
+  // ===== BAN無視 =====
+  const banList = await get("ban");
+  if (banList.includes(userId)) return;
+
+  // ===== 入室挨拶 =====
+  if (event.type === "memberJoined") {
+    const on = (await get("settings"))[0] !== "OFF";
+    if (!on) return;
+
+    const list = await get("join");
+    const msg = list.length
+      ? list[Math.floor(Math.random() * list.length)]
+      : "参加ありがとう！";
+
+    return reply(event, msg);
+  }
+
+  // ===== メッセージ =====
+  if (event.type === "message" && event.message.type === "text") {
+    const text = event.message.text;
+
+    // ===== menu =====
+    if (text.includes("menu")) return client.replyMessage(event.replyToken, menu());
+
+    if (text === "状態確認") return reply(event, "BOT正常稼働中");
+
+    // ===== 管理 =====
+    if (text === "管理一覧") return reply(event, (await get("admins")).join("\n") || "なし");
+
+    if (text.startsWith("管理追加 ")) {
+      await add("admins", [text.replace("管理追加 ", "")]);
+      return reply(event, "追加OK");
+    }
+
+    if (text.startsWith("管理削除 ")) {
+      await remove("admins", text.replace("管理削除 ", ""));
+      return reply(event, "削除OK");
+    }
+
+    // ===== 副管理 =====
+    if (text === "副管理一覧") return reply(event, (await get("subs")).join("\n") || "なし");
+
+    if (text.startsWith("副管理追加 ")) {
+      await add("subs", [text.replace("副管理追加 ", "")]);
+      return reply(event, "追加OK");
+    }
+
+    if (text.startsWith("副管理削除 ")) {
+      await remove("subs", text.replace("副管理削除 ", ""));
+      return reply(event, "削除OK");
+    }
+
+    // ===== BAN =====
+    if (text === "BAN一覧") return reply(event, (await get("ban")).join("\n") || "なし");
+
+    if (text.startsWith("通報")) {
+      await add("ban", [userId]);
+      return reply(event, "BAN");
+    }
+
+    if (text.startsWith("BAN解除 ")) {
+      await remove("ban", text.replace("BAN解除 ", ""));
+      return reply(event, "解除OK");
+    }
+
+    // ===== NG =====
+    if (text === "NG一覧") return reply(event, (await get("ng")).join("\n") || "なし");
+
+    if (text.startsWith("NG追加 ")) {
+      await add("ng", [text.replace("NG追加 ", "")]);
+      return reply(event, "追加OK");
+    }
+
+    // ===== 挨拶 =====
+    if (text === "挨拶ON") {
+      await setSetting("ON");
+      return reply(event, "ON");
+    }
+
+    if (text === "挨拶OFF") {
+      await setSetting("OFF");
+      return reply(event, "OFF");
+    }
+
+    if (text === "挨拶一覧") return reply(event, (await get("join")).join("\n") || "なし");
+
+    if (text.startsWith("挨拶追加 ")) {
+      await add("join", [text.replace("挨拶追加 ", "")]);
+      return reply(event, "追加OK");
+    }
+
+    if (text.startsWith("挨拶削除 ")) {
+      await remove("join", text.replace("挨拶削除 ", ""));
+      return reply(event, "削除OK");
+    }
+
+    // ===== NG検知 =====
+    const ng = await get("ng");
+    if (ng.some(w => text.includes(w))) {
+      await add("ban", [userId]);
+      return reply(event, "NG→BAN");
+    }
+
+    // ===== ログ =====
+    await add("log", [userId, text, new Date().toISOString()]);
+  }
+
+  return Promise.resolve(null);
+}
+
+// ===== menu（2列UI）=====
+function menu() {
+  const btn = (label, color="blue") => ({
+    type: "button",
+    style: "primary",
+    color: color === "red" ? "#ff4444" : "#3399ff",
+    action: { type: "message", label, text: label }
+  });
+
+  const row = (a,b) => ({
+    type:"box",
+    layout:"horizontal",
+    spacing:"md",
+    contents:[a,b]
+  });
+
   return {
     type:"flex",
     altText:"menu",
@@ -68,118 +172,64 @@ function menu(){
         layout:"vertical",
         spacing:"md",
         contents:[
-          btnRow("管理一覧","admin list","#00C851","副管理一覧","sub list","#00C851"),
-          btnRow("BAN一覧","ban list","#ff4444","NG一覧","ng list","#ffbb33"),
-          btnRow("管理追加","admin add ","#33b5e5","管理削除","admin remove ","#ff4444"),
-          btnRow("副管理追加","sub add ","#33b5e5","副管理削除","sub remove ","#ff4444"),
-          btnRow("NG追加","ng add ","#ffbb33","通報","通報 ","#ff4444"),
-          btnRow("BAN解除","unban ","#00C851","状態確認","ping","#1E90FF")
+          row(btn("管理一覧"),btn("副管理一覧")),
+          row(btn("BAN一覧","red"),btn("NG一覧","red")),
+          row(btn("管理追加"),btn("副管理追加")),
+          row(btn("NG追加"),btn("通報","red")),
+          row(btn("BAN解除"),btn("連投制限")),
+          row(btn("挨拶ON"),btn("挨拶OFF")),
+          row(btn("状態確認"),btn("挨拶一覧"))
         ]
       }
     }
   };
 }
 
-function btnRow(t1,m1,c1,t2,m2,c2){
-  return {
-    type:"box",
-    layout:"horizontal",
-    spacing:"md",
-    contents:[
-      btn(t1,m1,c1),
-      btn(t2,m2,c2)
-    ]
-  };
+// ===== 共通 =====
+function reply(event, text){
+  return client.replyMessage(event.replyToken,{type:"text",text});
 }
 
-function btn(label,text,color){
-  return {
-    type:"button",
-    style:"primary",
-    color,
-    action:{ type:"message", label, text }
-  };
+async function get(name){
+  const r = await sheets.spreadsheets.values.get({
+    spreadsheetId: SPREADSHEET_ID,
+    range: `${name}!A:A`
+  });
+  return r.data.values ? r.data.values.flat() : [];
 }
 
-// ===== メイン =====
-async function handleEvent(event){
-
-  if(event.type!=="message" || event.message.type!=="text") return;
-
-  const text = event.message.text;
-  const userId = event.source.userId;
-
-  const admins = (await get("admins!A:A")).map(v=>v[0]);
-  const subs = (await get("subs!A:A")).map(v=>v[0]);
-  const bans = (await get("ban!A:A")).map(v=>v[0]);
-  const ngs = (await get("ng!A:A")).map(v=>v[0]);
-
-  const isAdmin = admins.includes(userId);
-  const isSub = subs.includes(userId);
-
-  if(bans.includes(userId)) return;
-
-  // ===== menu =====
-  if(text==="menu"){
-    return reply(event, menu());
-  }
-
-  // ===== ping =====
-  if(text==="ping"){
-    return reply(event, {type:"text",text:"OK"});
-  }
-
-  // ===== 管理追加 =====
-  if(text.startsWith("admin add ") && isAdmin){
-    await add("admins!A:A", [[text.split(" ")[2]]]);
-  }
-
-  if(text==="admin list"){
-    return reply(event, {type:"text",text:admins.join("\n") || "なし"});
-  }
-
-  // ===== 副管理 =====
-  if(text.startsWith("sub add ") && isAdmin){
-    await add("subs!A:A", [[text.split(" ")[2]]]);
-  }
-
-  if(text==="sub list"){
-    return reply(event, {type:"text",text:subs.join("\n") || "なし"});
-  }
-
-  // ===== BAN =====
-  if(text.startsWith("通報 ")){
-    await add("ban!A:A", [[text.split(" ")[1]]]);
-  }
-
-  if(text==="ban list"){
-    return reply(event, {type:"text",text:bans.join("\n") || "なし"});
-  }
-
-  // ===== NG =====
-  if(text.startsWith("ng add ")){
-    await add("ng!A:A", [[text.split(" ")[2]]]);
-  }
-
-  if(text==="ng list"){
-    return reply(event, {type:"text",text:ngs.join("\n") || "なし"});
-  }
-
-  for(let w of ngs){
-    if(text.includes(w)){
-      await add("ban!A:A", [[userId]]);
-      return reply(event,{type:"text",text:"NG BAN"});
-    }
-  }
-
-  // ===== ログ =====
-  await add("log!A:B", [[new Date().toISOString(), text]]);
+async function add(name, values){
+  await sheets.spreadsheets.values.append({
+    spreadsheetId: SPREADSHEET_ID,
+    range: `${name}!A:A`,
+    valueInputOption:"RAW",
+    requestBody:{values:[values]}
+  });
 }
 
-// ===== reply =====
-function reply(event, msg){
-  return client.replyMessage(event.replyToken, msg);
+async function remove(name, target){
+  const list = await get(name);
+  const filtered = list.filter(v=>v!==target);
+
+  await sheets.spreadsheets.values.clear({
+    spreadsheetId: SPREADSHEET_ID,
+    range: `${name}!A:A`
+  });
+
+  for(const v of filtered){
+    await add(name,[v]);
+  }
+}
+
+async function setSetting(val){
+  await sheets.spreadsheets.values.update({
+    spreadsheetId: SPREADSHEET_ID,
+    range:"settings!A1",
+    valueInputOption:"RAW",
+    requestBody:{values:[[val]]}
+  });
 }
 
 // ===== 起動 =====
-app.listen(10000, ()=>console.log("起動OK"));
+const PORT = process.env.PORT || 3000;
+app.listen(PORT,()=>console.log("起動OK"));
