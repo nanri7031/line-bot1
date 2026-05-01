@@ -2,7 +2,7 @@ import express from "express";
 import * as line from "@line/bot-sdk";
 import { google } from "googleapis";
 
-// ===== LINE設定 =====
+// ===== LINE =====
 const config = {
   channelAccessToken: process.env.CHANNEL_ACCESS_TOKEN,
   channelSecret: process.env.CHANNEL_SECRET,
@@ -15,10 +15,15 @@ let SUB_ADMINS = [];
 // ===== システム =====
 let BAN_USERS = [];
 let NG_WORDS = ["死ね", "荒らし"];
-let GREETING = true;
+let GREETING_ON = true;
+let JOIN_ON = true;
 let SPAM_LIMIT = 5;
+
 let MESSAGE_LOG = {};
 let REPORT_COUNT = {};
+
+// ===== 入室挨拶 =====
+let JOIN_MESSAGES = ["ようこそ！"];
 
 // ===== Sheets =====
 const SPREADSHEET_ID = "1ZgDYtjmF0eNSab654gGLrfl11i_jmaVQW2WmaVRV1Lw";
@@ -38,41 +43,46 @@ app.get("/", (req, res) => res.send("BOT起動中"));
 
 // ===== Webhook =====
 app.post("/webhook", line.middleware(config), async (req, res) => {
-  await Promise.all(req.body.events.map(handleEvent));
-  res.json({ ok: true });
+  try {
+    await Promise.all(req.body.events.map(handleEvent));
+    res.json({ ok: true });
+  } catch (e) {
+    console.error(e);
+    res.status(500).end();
+  }
 });
 
 // ===== メイン処理 =====
 async function handleEvent(event) {
 
-  // ===== メニュー（最優先に置く）=====
-  if (event.type === "message" && event.message.type === "text") {
-    const text = event.message.text;
+  // ===== 入室挨拶 =====
+  if (event.type === "memberJoined" && JOIN_ON) {
+    const names = [];
 
-    if (text === "menu") {
-      return client.replyMessage(event.replyToken, {
-        type: "flex",
-        altText: "管理メニュー",
-        contents: {
-          type: "bubble",
-          body: {
-            type: "box",
-            layout: "vertical",
-            spacing: "md",
-            contents: [
-              button("管理一覧", "admin list"),
-              button("副管理一覧", "sub list"),
-              button("BAN一覧", "ban list"),
-              button("NG一覧", "ng list"),
-              button("状態確認", "ping")
-            ]
-          }
-        }
-      });
+    for (const member of event.joined.members) {
+      try {
+        const profile = await client.getGroupMemberProfile(
+          event.source.groupId,
+          member.userId
+        );
+        names.push(profile.displayName);
+      } catch {
+        names.push("新規メンバー");
+      }
     }
+
+    const msg =
+      names.join("さん、") +
+      "さん\n" +
+      JOIN_MESSAGES[Math.floor(Math.random() * JOIN_MESSAGES.length)];
+
+    return client.replyMessage(event.replyToken, {
+      type: "text",
+      text: msg,
+    });
   }
 
-  // ===== 通常処理 =====
+  // ===== メッセージ以外無視 =====
   if (event.type !== "message" || event.message.type !== "text") return;
 
   const text = event.message.text;
@@ -85,14 +95,31 @@ async function handleEvent(event) {
   // ===== BAN無反応 =====
   if (BAN_USERS.includes(userId)) return;
 
-  // ===== 稼働確認 =====
-  if (text === "ping") return reply(event, "pong（稼働中）");
-
-  // ===== 挨拶 =====
-  if (GREETING && ["こんにちは", "おはよう"].includes(text)) {
-    const msg = ["よろしく！", "どうも！", "いらっしゃい！"];
-    return reply(event, msg[Math.floor(Math.random() * msg.length)]);
+  // ===== メニュー =====
+  if (text === "menu") {
+    return client.replyMessage(event.replyToken, {
+      type: "flex",
+      altText: "メニュー",
+      contents: {
+        type: "bubble",
+        body: {
+          type: "box",
+          layout: "vertical",
+          spacing: "md",
+          contents: [
+            btn("管理一覧", "admin list"),
+            btn("副管理一覧", "sub list"),
+            btn("BAN一覧", "ban list"),
+            btn("NG一覧", "ng list"),
+            btn("状態確認", "ping")
+          ]
+        }
+      }
+    });
   }
+
+  // ===== 確認 =====
+  if (text === "ping") return reply(event, "pong（稼働中）");
 
   // ===== 連投 =====
   if (!MESSAGE_LOG[userId]) MESSAGE_LOG[userId] = [];
@@ -166,6 +193,21 @@ async function handleEvent(event) {
 
   if (text === "ng list") return reply(event, NG_WORDS.join(", "));
 
+  // ===== 入室挨拶管理 =====
+  if (text.startsWith("join add ") && isAdmin) {
+    JOIN_MESSAGES.push(text.replace("join add ", ""));
+    return reply(event, "追加OK");
+  }
+
+  if (text.startsWith("join remove ") && isAdmin) {
+    JOIN_MESSAGES = JOIN_MESSAGES.filter(m => m !== text.replace("join remove ", ""));
+    return reply(event, "削除OK");
+  }
+
+  if (text === "join list") return reply(event, JOIN_MESSAGES.join("\n"));
+  if (text === "join on") JOIN_ON = true;
+  if (text === "join off") JOIN_ON = false;
+
   // ===== 保存 =====
   await sheets.spreadsheets.values.append({
     spreadsheetId: SPREADSHEET_ID,
@@ -180,7 +222,7 @@ async function handleEvent(event) {
 }
 
 // ===== ボタン =====
-function button(label, text) {
+function btn(label, text) {
   return {
     type: "button",
     style: "primary",
@@ -199,4 +241,4 @@ function reply(event, text) {
 
 // ===== 起動 =====
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log("🚀 最強BOT起動"));
+app.listen(PORT, () => console.log("🚀 完全版BOT起動"));
