@@ -1,5 +1,5 @@
 import express from "express";
-import line from "@line/bot-sdk";
+import * as line from "@line/bot-sdk";
 import { google } from "googleapis";
 
 // ===== LINE設定 =====
@@ -8,15 +8,14 @@ const config = {
   channelSecret: process.env.CHANNEL_SECRET,
 };
 
-// ===== 管理者ID（自分 + 追加OK）=====
+// ===== 管理者 =====
 const ADMIN_IDS = [
-  "U1a1aca9e44466f8cb05003d7dc86fee0", // ←あなた
+  "U1a1aca9e44466f8cb05003d7dc86fee0",
 ];
 
-// ===== Google Sheets設定 =====
+// ===== Sheets =====
 const SPREADSHEET_ID = "1ZgDYtjmF0eNSab654gGLrfl11i_jmaVQW2WmaVRV1Lw";
 
-// 🔥 JSONはそのまま（改行OK）
 const auth = new google.auth.GoogleAuth({
   credentials: JSON.parse(process.env.GOOGLE_CREDENTIALS),
   scopes: ["https://www.googleapis.com/auth/spreadsheets"],
@@ -24,7 +23,7 @@ const auth = new google.auth.GoogleAuth({
 
 const sheets = google.sheets({ version: "v4", auth });
 
-// ===== LINEクライアント =====
+// ===== LINE =====
 const client = new line.Client(config);
 
 // ===== Express =====
@@ -34,11 +33,9 @@ app.get("/", (req, res) => {
   res.send("BOT起動中");
 });
 
-// ===== Webhook =====
 app.post("/webhook", line.middleware(config), async (req, res) => {
   try {
-    const events = req.body.events;
-    await Promise.all(events.map(handleEvent));
+    await Promise.all(req.body.events.map(handleEvent));
     res.json({ status: "ok" });
   } catch (err) {
     console.error(err);
@@ -46,45 +43,35 @@ app.post("/webhook", line.middleware(config), async (req, res) => {
   }
 });
 
-// ===== イベント処理 =====
+// ===== 処理 =====
 async function handleEvent(event) {
-  if (event.type !== "message" || event.message.type !== "text") return;
+  if (event.type !== "message") return;
 
-  const userId = event.source.userId;
   const text = event.message.text;
+  const userId = event.source.userId;
 
-  // ===== BOT確認コマンド =====
+  // 動作確認
   if (text === "ping") {
     return client.replyMessage(event.replyToken, {
       type: "text",
-      text: "pong（BOT動いてる）",
+      text: "pong（OK）",
     });
   }
 
-  // ===== 管理者チェック =====
-  const isAdmin = ADMIN_IDS.includes(userId);
-
-  // ===== 管理者追加 =====
-  if (text.startsWith("admin add ") && isAdmin) {
-    const newId = text.replace("admin add ", "").trim();
-    ADMIN_IDS.push(newId);
-
-    return client.replyMessage(event.replyToken, {
-      type: "text",
-      text: `管理者追加: ${newId}`,
-    });
-  }
-
-  // ===== 管理者確認 =====
-  if (text === "admin list") {
-    return client.replyMessage(event.replyToken, {
-      type: "text",
-      text: ADMIN_IDS.join("\n"),
-    });
-  }
-
-  // ===== Sheetsに保存 =====
-  await saveToSheet(event);
+  // Sheets保存
+  await sheets.spreadsheets.values.append({
+    spreadsheetId: SPREADSHEET_ID,
+    range: "Sheet1!A:D",
+    valueInputOption: "RAW",
+    requestBody: {
+      values: [[
+        new Date().toLocaleString("ja-JP"),
+        userId,
+        event.source.groupId || "個チャ",
+        text
+      ]],
+    },
+  });
 
   return client.replyMessage(event.replyToken, {
     type: "text",
@@ -92,25 +79,8 @@ async function handleEvent(event) {
   });
 }
 
-// ===== Sheets書き込み =====
-async function saveToSheet(event) {
-  const userId = event.source.userId;
-  const groupId = event.source.groupId || "個チャ";
-  const text = event.message.text;
-  const time = new Date().toLocaleString("ja-JP");
-
-  await sheets.spreadsheets.values.append({
-    spreadsheetId: SPREADSHEET_ID,
-    range: "Sheet1!A:D",
-    valueInputOption: "RAW",
-    requestBody: {
-      values: [[time, userId, groupId, text]],
-    },
-  });
-}
-
 // ===== 起動 =====
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  console.log("🚀 Server running on " + PORT);
+  console.log("🚀 起動成功 " + PORT);
 });
