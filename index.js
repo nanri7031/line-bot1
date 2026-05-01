@@ -1,5 +1,5 @@
 import express from "express";
-import line from "@line/bot-sdk";
+import { Client, middleware } from "@line/bot-sdk";
 import { google } from "googleapis";
 
 const app = express();
@@ -12,8 +12,7 @@ const config = {
   channelSecret: process.env.CHANNEL_SECRET,
 };
 
-const client = new line.Client(config);
-const middleware = line.middleware;
+const client = new Client(config);
 
 /* ===============================
    Google Sheets
@@ -37,7 +36,7 @@ async function getList(sheet) {
     });
     return res.data.values ? res.data.values.flat() : [];
   } catch (e) {
-    console.log("getList error:", e.message);
+    console.log("get error:", sheet, e.message);
     return [];
   }
 }
@@ -66,8 +65,21 @@ async function remove(sheet, value) {
 }
 
 /* ===============================
-   メニュー（2列風UI）
+   メニュー（青・赤ボタン）
 =============================== */
+function btn(label, text, danger = false) {
+  return {
+    type: "button",
+    style: "primary",
+    color: danger ? "#ff4444" : "#3399ff",
+    action: {
+      type: "message",
+      label,
+      text,
+    },
+  };
+}
+
 function menuFlex() {
   return {
     type: "flex",
@@ -97,19 +109,6 @@ function menuFlex() {
   };
 }
 
-function btn(label, text, danger = false) {
-  return {
-    type: "button",
-    style: "primary",
-    color: danger ? "#ff4444" : "#3399ff",
-    action: {
-      type: "message",
-      label,
-      text,
-    },
-  };
-}
-
 /* ===============================
    Webhook
 =============================== */
@@ -122,12 +121,12 @@ app.post("/webhook", middleware(config), async (req, res) => {
    メイン処理
 =============================== */
 async function handleEvent(event) {
-  console.log("event:", JSON.stringify(event)); // ←重要
+  console.log("event:", JSON.stringify(event));
 
   if (event.type === "follow") {
     return client.replyMessage(event.replyToken, {
       type: "text",
-      text: "追加ありがとう！menuと送って",
+      text: "追加ありがとう！menuで操作できます",
     });
   }
 
@@ -143,7 +142,7 @@ async function handleEvent(event) {
   const text = event.message.text.trim();
   const userId = event.source.userId;
 
-  /* ===== BAN済み ===== */
+  /* ===== BANチェック ===== */
   const banList = await getList("ban");
   if (banList.includes(userId)) return;
 
@@ -153,7 +152,7 @@ async function handleEvent(event) {
     await add("ban", userId);
     return client.replyMessage(event.replyToken, {
       type: "text",
-      text: "NG検知→BAN",
+      text: "NG検知 → BAN",
     });
   }
 
@@ -175,7 +174,7 @@ async function handleEvent(event) {
     await add("ng", word);
     return client.replyMessage(event.replyToken, {
       type: "text",
-      text: "追加OK",
+      text: "NG追加OK",
     });
   }
 
@@ -200,7 +199,7 @@ async function handleEvent(event) {
     await remove("ban", id);
     return client.replyMessage(event.replyToken, {
       type: "text",
-      text: "解除OK",
+      text: "BAN解除OK",
     });
   }
 
