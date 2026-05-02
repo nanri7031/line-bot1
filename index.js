@@ -14,11 +14,9 @@ const config = {
 const client = new Client(config);
 
 /* ===============================
-   Google Sheets（改行対策済み）
+   Google Sheets
 =============================== */
 const creds = JSON.parse(process.env.GOOGLE_CREDENTIALS);
-
-// 🔥 ここ超重要（改行修正）
 creds.private_key = creds.private_key.replace(/\\n/g, "\n");
 
 const auth = new google.auth.GoogleAuth({
@@ -30,7 +28,7 @@ const sheets = google.sheets({ version: "v4", auth });
 const SPREADSHEET_ID = process.env.SPREADSHEET_ID;
 
 /* ===============================
-   共通（絶対落ちない）
+   共通
 =============================== */
 async function getList(sheet) {
   try {
@@ -39,26 +37,21 @@ async function getList(sheet) {
       range: `${sheet}!A1:A1000`,
     });
     return res.data.values ? res.data.values.flat() : [];
-  } catch (e) {
-    console.log("get error:", sheet, e.message);
+  } catch {
     return [];
   }
 }
 
 async function add(sheet, value) {
   try {
-    console.log("追加開始:", sheet, value);
-
     await sheets.spreadsheets.values.append({
       spreadsheetId: SPREADSHEET_ID,
       range: `${sheet}!A1`,
       valueInputOption: "RAW",
       requestBody: { values: [[value]] },
     });
-
-    console.log("追加成功");
   } catch (e) {
-    console.log("🔥追加エラー:", e.message);
+    console.log("add error:", e.message);
   }
 }
 
@@ -76,7 +69,7 @@ async function remove(sheet, value) {
       },
     });
   } catch (e) {
-    console.log("remove error:", sheet, e.message);
+    console.log("remove error:", e.message);
   }
 }
 
@@ -136,7 +129,7 @@ app.post("/webhook", middleware(config), async (req, res) => {
 });
 
 /* ===============================
-   メイン処理（全部入り）
+   メイン（完全安定版）
 =============================== */
 async function handleEvent(event) {
   try {
@@ -147,22 +140,23 @@ async function handleEvent(event) {
 
     console.log("受信:", text);
 
-    /* ===== 基本 ===== */
+    /* ===== ping ===== */
     if (text === "ping") {
       return client.replyMessage(event.replyToken, { type: "text", text: "OK" });
     }
 
+    /* ===== menu ===== */
     if (text === "menu") {
       return client.replyMessage(event.replyToken, menuFlex());
     }
 
-    /* ===== BAN無視 ===== */
+    /* ===== BAN ===== */
     const banList = await getList("ban");
     if (banList.includes(userId)) return;
 
-    /* ===== NG検知 → BAN ===== */
+    /* ===== NG検知 ===== */
     const ngList = await getList("ng");
-    if (ngList.some(word => text.includes(word))) {
+    if (ngList.some(w => text.includes(w))) {
       await add("ban", userId);
       return client.replyMessage(event.replyToken, {
         type: "text",
@@ -170,19 +164,16 @@ async function handleEvent(event) {
       });
     }
 
-    /* ===== NG追加（完全版） ===== */
+    /* ===== NG追加 ===== */
     if (text.startsWith("NG追加")) {
       const word = text.replace("NG追加", "").trim();
-
       if (!word) {
         return client.replyMessage(event.replyToken, {
           type: "text",
           text: "NGワード入力して",
         });
       }
-
       await add("ng", word);
-
       return client.replyMessage(event.replyToken, {
         type: "text",
         text: "NG追加OK",
@@ -225,9 +216,22 @@ async function handleEvent(event) {
     /* ===== 管理追加 ===== */
     if (text.startsWith("管理追加")) {
       const id = text.split("@")[1];
-      if (!id) return;
+      if (!id) {
+        return client.replyMessage(event.replyToken, {
+          type: "text",
+          text: "IDを@付きで送って",
+        });
+      }
       await add("admins", id);
       return client.replyMessage(event.replyToken, { type: "text", text: "追加OK" });
+    }
+
+    /* ===== 管理削除 ===== */
+    if (text.startsWith("管理削除")) {
+      const id = text.split("@")[1];
+      if (!id) return;
+      await remove("admins", id);
+      return client.replyMessage(event.replyToken, { type: "text", text: "削除OK" });
     }
 
     /* ===== 副管理追加 ===== */
@@ -238,7 +242,15 @@ async function handleEvent(event) {
       return client.replyMessage(event.replyToken, { type: "text", text: "追加OK" });
     }
 
-    /* ===== 通報→BAN ===== */
+    /* ===== 副管理削除 ===== */
+    if (text.startsWith("副管理削除")) {
+      const id = text.split("@")[1];
+      if (!id) return;
+      await remove("subs", id);
+      return client.replyMessage(event.replyToken, { type: "text", text: "削除OK" });
+    }
+
+    /* ===== 通報BAN ===== */
     if (text.startsWith("通報")) {
       const id = text.split("@")[1];
       if (!id) return;
@@ -254,12 +266,14 @@ async function handleEvent(event) {
       return client.replyMessage(event.replyToken, { type: "text", text: "解除OK" });
     }
 
-  } catch (err) {
-    console.log("🔥エラー:", err);
+    /* ===== fallback ===== */
     return client.replyMessage(event.replyToken, {
       type: "text",
-      text: "内部エラー",
+      text: "コマンド未対応",
     });
+
+  } catch (err) {
+    console.log("🔥エラー:", err);
   }
 }
 
