@@ -26,13 +26,13 @@ const sheets = google.sheets({ version: "v4", auth });
 const SPREADSHEET_ID = process.env.SPREADSHEET_ID;
 
 /* ===============================
-   安全版 共通関数（落ちない）
+   共通（絶対落ちない）
 =============================== */
 async function getList(sheet) {
   try {
     const res = await sheets.spreadsheets.values.get({
       spreadsheetId: SPREADSHEET_ID,
-      range: `${sheet}!A1:A`,
+      range: `${sheet}!A1:A1000`, // ←修正済み
     });
     return res.data.values ? res.data.values.flat() : [];
   } catch (e) {
@@ -73,7 +73,7 @@ async function remove(sheet, value) {
 }
 
 /* ===============================
-   メニューUI（青/赤）
+   UI（青＋赤）
 =============================== */
 function btn(label, text, danger = false) {
   return {
@@ -122,7 +122,7 @@ app.post("/webhook", middleware(config), async (req, res) => {
 });
 
 /* ===============================
-   メイン処理（絶対落ちない）
+   メイン（完全ガード）
 =============================== */
 async function handleEvent(event) {
   try {
@@ -147,7 +147,7 @@ async function handleEvent(event) {
     const text = event.message.text.trim();
     const userId = event.source.userId;
 
-    /* ===== 最優先（必ず返る） ===== */
+    /* ===== 基本動作 ===== */
     if (text === "ping") {
       return client.replyMessage(event.replyToken, {
         type: "text",
@@ -222,12 +222,12 @@ async function handleEvent(event) {
       await remove("ban", id);
       return client.replyMessage(event.replyToken, {
         type: "text",
-        text: "解除OK",
+        text: "BAN解除OK",
       });
     }
 
   } catch (err) {
-    console.log("🔥致命エラー:", err);
+    console.log("🔥エラー:", err);
 
     try {
       return client.replyMessage(event.replyToken, {
