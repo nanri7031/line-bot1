@@ -5,13 +5,18 @@ import { google } from "googleapis";
 const app = express();
 
 /* ===============================
-   LINE設定
+   LINE
 =============================== */
 const config = {
   channelAccessToken: process.env.CHANNEL_ACCESS_TOKEN,
   channelSecret: process.env.CHANNEL_SECRET,
 };
 const client = new Client(config);
+
+/* ===============================
+   ★ 固定管理者（あなた）
+=============================== */
+const OWNER_ID = "U1a1aca9e44466f8cb05003d7dc86fee0";
 
 /* ===============================
    Google Sheets
@@ -51,26 +56,16 @@ async function add(sheet, value) {
       requestBody: { values: [[value]] },
     });
   } catch (e) {
-    console.log("add error:", e.message);
+    console.log(e.message);
   }
 }
 
-async function remove(sheet, value) {
-  try {
-    const list = await getList(sheet);
-    const newList = list.filter(v => v !== value);
-
-    await sheets.spreadsheets.values.update({
-      spreadsheetId: SPREADSHEET_ID,
-      range: `${sheet}!A1`,
-      valueInputOption: "RAW",
-      requestBody: {
-        values: newList.map(v => [v]),
-      },
-    });
-  } catch (e) {
-    console.log("remove error:", e.message);
-  }
+/* ===============================
+   管理者チェック
+=============================== */
+async function isAdmin(userId) {
+  const admins = await getList("admins");
+  return admins.includes(userId) || userId === OWNER_ID;
 }
 
 /* ===============================
@@ -89,7 +84,6 @@ function row(a, b) {
   return {
     type: "box",
     layout: "horizontal",
-    spacing: "sm",
     contents: [
       { type: "box", layout: "vertical", contents: [a], flex: 1 },
       { type: "box", layout: "vertical", contents: [b], flex: 1 },
@@ -106,7 +100,6 @@ function menuFlex() {
       body: {
         type: "box",
         layout: "vertical",
-        spacing: "sm",
         contents: [
           row(btn("管理一覧", "管理一覧"), btn("副管理一覧", "副管理一覧")),
           row(btn("BAN一覧", "BAN一覧"), btn("NG一覧", "NG一覧")),
@@ -129,48 +122,48 @@ app.post("/webhook", middleware(config), async (req, res) => {
 });
 
 /* ===============================
-   メイン（完全安定版）
+   メイン
 =============================== */
 async function handleEvent(event) {
   try {
+    if (event.type === "memberJoined") {
+      return client.replyMessage(event.replyToken, {
+        type: "text",
+        text: "参加ありがとう！",
+      });
+    }
+
     if (event.type !== "message" || event.message.type !== "text") return;
 
-    const text = event.message.text.trim();
+    const text = event.message.text;
     const userId = event.source.userId;
 
-    console.log("受信:", text);
-
-    /* ===== ping ===== */
+    /* ===== 基本 ===== */
     if (text === "ping") {
       return client.replyMessage(event.replyToken, { type: "text", text: "OK" });
     }
 
-    /* ===== menu ===== */
     if (text === "menu") {
       return client.replyMessage(event.replyToken, menuFlex());
     }
 
-    /* ===== BAN ===== */
-    const banList = await getList("ban");
-    if (banList.includes(userId)) return;
+    /* ===== 管理者チェック ===== */
+    const admin = await isAdmin(userId);
 
-    /* ===== NG検知 ===== */
-    const ngList = await getList("ng");
-    if (ngList.some(w => text.includes(w))) {
-      await add("ban", userId);
-      return client.replyMessage(event.replyToken, {
-        type: "text",
-        text: "NG検知→BAN",
-      });
+    /* ===== メンション取得 ===== */
+    let targetId = null;
+    if (event.message.mention) {
+      targetId = event.message.mention.mentionees[0].userId;
     }
 
     /* ===== NG追加 ===== */
     if (text.startsWith("NG追加")) {
+      if (!admin) return;
       const word = text.replace("NG追加", "").trim();
       if (!word) {
         return client.replyMessage(event.replyToken, {
           type: "text",
-          text: "NGワード入力して",
+          text: "NGワード入れて",
         });
       }
       await add("ng", word);
@@ -180,105 +173,44 @@ async function handleEvent(event) {
       });
     }
 
-    /* ===== 一覧 ===== */
-    if (text === "NG一覧") {
-      const list = await getList("ng");
-      return client.replyMessage(event.replyToken, {
-        type: "text",
-        text: list.join("\n") || "なし",
-      });
-    }
-
-    if (text === "BAN一覧") {
-      const list = await getList("ban");
-      return client.replyMessage(event.replyToken, {
-        type: "text",
-        text: list.join("\n") || "なし",
-      });
-    }
-
-    if (text === "管理一覧") {
-      const list = await getList("admins");
-      return client.replyMessage(event.replyToken, {
-        type: "text",
-        text: list.join("\n") || "なし",
-      });
-    }
-
-    if (text === "副管理一覧") {
-      const list = await getList("subs");
-      return client.replyMessage(event.replyToken, {
-        type: "text",
-        text: list.join("\n") || "なし",
-      });
-    }
-
     /* ===== 管理追加 ===== */
     if (text.startsWith("管理追加")) {
-      const id = text.split("@")[1];
-      if (!id) {
+      if (!admin) return;
+      if (!targetId) {
         return client.replyMessage(event.replyToken, {
           type: "text",
-          text: "IDを@付きで送って",
+          text: "@で指定して",
         });
       }
-      await add("admins", id);
-      return client.replyMessage(event.replyToken, { type: "text", text: "追加OK" });
+      await add("admins", targetId);
+      return client.replyMessage(event.replyToken, {
+        type: "text",
+        text: "管理追加OK",
+      });
     }
 
-    /* ===== 管理削除 ===== */
-    if (text.startsWith("管理削除")) {
-      const id = text.split("@")[1];
-      if (!id) return;
-      await remove("admins", id);
-      return client.replyMessage(event.replyToken, { type: "text", text: "削除OK" });
-    }
-
-    /* ===== 副管理追加 ===== */
-    if (text.startsWith("副管理追加")) {
-      const id = text.split("@")[1];
-      if (!id) return;
-      await add("subs", id);
-      return client.replyMessage(event.replyToken, { type: "text", text: "追加OK" });
-    }
-
-    /* ===== 副管理削除 ===== */
-    if (text.startsWith("副管理削除")) {
-      const id = text.split("@")[1];
-      if (!id) return;
-      await remove("subs", id);
-      return client.replyMessage(event.replyToken, { type: "text", text: "削除OK" });
-    }
-
-    /* ===== 通報BAN ===== */
+    /* ===== 通報 ===== */
     if (text.startsWith("通報")) {
-      const id = text.split("@")[1];
-      if (!id) return;
-      await add("ban", id);
-      return client.replyMessage(event.replyToken, { type: "text", text: "BAN完了" });
+      if (!admin) return;
+      if (!targetId) {
+        return client.replyMessage(event.replyToken, {
+          type: "text",
+          text: "@で指定して",
+        });
+      }
+      await add("ban", targetId);
+      return client.replyMessage(event.replyToken, {
+        type: "text",
+        text: "BAN完了",
+      });
     }
 
-    /* ===== BAN解除 ===== */
-    if (text.startsWith("解除")) {
-      const id = text.split("@")[1];
-      if (!id) return;
-      await remove("ban", id);
-      return client.replyMessage(event.replyToken, { type: "text", text: "解除OK" });
-    }
-
-    /* ===== fallback ===== */
-    return client.replyMessage(event.replyToken, {
-      type: "text",
-      text: "コマンド未対応",
-    });
-
-  } catch (err) {
-    console.log("🔥エラー:", err);
+  } catch (e) {
+    console.log(e);
   }
 }
 
 /* ===============================
    起動
 =============================== */
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log("起動OK"));
+app.listen(3000, () => console.log("起動OK"));
