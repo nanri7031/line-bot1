@@ -4,21 +4,24 @@ import { google } from "googleapis";
 
 const app = express();
 
+// ===== LINE =====
 const config = {
   channelAccessToken: process.env.CHANNEL_ACCESS_TOKEN,
   channelSecret: process.env.CHANNEL_SECRET
 };
 const client = new Client(config);
 
-// ===== 安定送信 =====
-const send = async (event, msg) => {
+// ===== 安全送信 =====
+const send = async (e, msg) => {
   try {
-    await client.replyMessage(event.replyToken, msg);
-  } catch {
-    if (event.source.groupId) {
-      await client.pushMessage(event.source.groupId, msg);
-    } else {
-      await client.pushMessage(event.source.userId, msg);
+    await client.replyMessage(e.replyToken, msg);
+  } catch (err) {
+    console.log("reply失敗:", err.message);
+    try {
+      const id = e.source.groupId || e.source.userId;
+      await client.pushMessage(id, msg);
+    } catch (e2) {
+      console.log("push失敗:", e2.message);
     }
   }
 };
@@ -34,31 +37,45 @@ const auth = new google.auth.JWT(
 const sheets = google.sheets({ version: "v4", auth });
 const sheetId = process.env.SPREADSHEET_ID;
 
+// ===== 設定 =====
 const OWNER = "U1a1aca9e44466f8cb05003d7dc86fee0";
 const PASS = "1234";
 
 // ===== util =====
 const getMention = e => e.message.mention?.mentionees?.[0]?.userId;
-const getSheet = async r => (await sheets.spreadsheets.values.get({
-  spreadsheetId: sheetId,
-  range: r
-})).data.values || [];
+
+// ⭐ 安全化
+const getSheet = async (range) => {
+  try {
+    const res = await sheets.spreadsheets.values.get({
+      spreadsheetId: sheetId,
+      range
+    });
+    return res.data.values || [];
+  } catch (e) {
+    console.log("Sheetエラー:", e.message);
+    return [];
+  }
+};
 
 // ===== settings =====
 async function getSetting(g){
   const rows = await getSheet("settings!A:D");
   return rows.reverse().find(r=>r[0]===g) || [g,5,"ON","ようこそ！"];
 }
+
 async function setSetting(g,l,gr,t){
-  await sheets.spreadsheets.values.append({
-    spreadsheetId:sheetId,
-    range:"settings!A:D",
-    valueInputOption:"RAW",
-    requestBody:{values:[[g,l,gr,t]]}
-  });
+  try{
+    await sheets.spreadsheets.values.append({
+      spreadsheetId:sheetId,
+      range:"settings!A:D",
+      valueInputOption:"RAW",
+      requestBody:{values:[[g,l,gr,t]]}
+    });
+  }catch(e){console.log("setting保存エラー",e.message);}
 }
 
-// ===== 管理 =====
+// ===== 管理判定 =====
 async function isAdmin(g,u){
   if(u===OWNER) return true;
   const r = await getSheet("admins!A:B");
@@ -67,6 +84,8 @@ async function isAdmin(g,u){
 
 // ===== Webhook =====
 app.post("/webhook", middleware(config), async (req,res)=>{
+
+try{
 
 for(const e of req.body.events){
 
@@ -84,7 +103,7 @@ if(e.type==="memberJoined"){
   continue;
 }
 
-if(e.type!=="message"||e.message.type!=="text") continue;
+if(e.type!=="message" || e.message.type!=="text") continue;
 
 const t = e.message.text.trim();
 
@@ -95,63 +114,33 @@ type:"flex",
 altText:"管理メニュー",
 contents:{
 type:"bubble",
-size:"mega",
 body:{
 type:"box",
 layout:"vertical",
-spacing:"md",
 contents:[
 
-// タイトル
-{
-type:"box",
-layout:"vertical",
-backgroundColor:"#0D47A1",
-paddingAll:"14px",
-contents:[
-{type:"text",text:"管理メニュー",color:"#fff",align:"center",weight:"bold",size:"lg"}
-]
-},
+{type:"text",text:"管理メニュー",weight:"bold",size:"lg"},
 
-// 管理
-{type:"box",layout:"horizontal",contents:[
-{type:"button",style:"primary",color:"#1565C0",action:{type:"message",label:"管理登録",text:"管理登録 1234"}},
-{type:"button",style:"primary",color:"#1565C0",action:{type:"message",label:"管理一覧",text:"管理一覧"}}
-]},
-{type:"box",layout:"horizontal",contents:[
-{type:"button",style:"primary",color:"#1565C0",action:{type:"message",label:"管理追加",text:"管理追加"}},
-{type:"button",style:"primary",color:"#1565C0",action:{type:"message",label:"管理削除",text:"管理削除"}}
-]},
+{type:"button",action:{type:"message",label:"管理登録",text:"管理登録 1234"}},
+{type:"button",action:{type:"message",label:"管理一覧",text:"管理一覧"}},
+{type:"button",action:{type:"message",label:"管理追加",text:"管理追加"}},
+{type:"button",action:{type:"message",label:"管理削除",text:"管理削除"}},
 
-// 副管理（緑）
-{type:"box",layout:"horizontal",contents:[
-{type:"button",style:"primary",color:"#2E7D32",action:{type:"message",label:"副管理追加",text:"副管理追加"}},
-{type:"button",style:"primary",color:"#2E7D32",action:{type:"message",label:"副管理削除",text:"副管理削除"}}
-]},
-{type:"box",layout:"horizontal",contents:[
-{type:"button",style:"primary",color:"#2E7D32",action:{type:"message",label:"副管理一覧",text:"副管理一覧"}},
-{type:"button",style:"primary",color:"#1565C0",action:{type:"message",label:"状態確認",text:"状態確認"}}
-]},
+{type:"button",action:{type:"message",label:"副管理追加",text:"副管理追加"}},
+{type:"button",action:{type:"message",label:"副管理削除",text:"副管理削除"}},
+{type:"button",action:{type:"message",label:"副管理一覧",text:"副管理一覧"}},
 
-// NG（赤）
-{type:"box",layout:"horizontal",contents:[
-{type:"button",style:"primary",color:"#D32F2F",action:{type:"message",label:"NG追加",text:"NG追加 test"}},
-{type:"button",style:"primary",color:"#D32F2F",action:{type:"message",label:"NG一覧",text:"NG一覧"}}
-]},
-{type:"box",layout:"horizontal",contents:[
-{type:"button",style:"primary",color:"#D32F2F",action:{type:"message",label:"NG削除",text:"NG削除 test"}},
-{type:"button",style:"primary",color:"#1565C0",action:{type:"message",label:"連投制限",text:"連投制限 5"}}
-]},
+{type:"button",action:{type:"message",label:"NG追加",text:"NG追加 test"}},
+{type:"button",action:{type:"message",label:"NG削除",text:"NG削除 test"}},
+{type:"button",action:{type:"message",label:"NG一覧",text:"NG一覧"}},
 
-// 挨拶（黒）
-{type:"box",layout:"horizontal",contents:[
-{type:"button",style:"primary",color:"#000000",action:{type:"message",label:"挨拶ON",text:"挨拶ON"}},
-{type:"button",style:"primary",color:"#333333",action:{type:"message",label:"挨拶OFF",text:"挨拶OFF"}}
-]},
-{type:"box",layout:"horizontal",contents:[
-{type:"button",style:"primary",color:"#1565C0",action:{type:"message",label:"挨拶登録",text:"挨拶登録 ようこそ！"}},
-{type:"button",style:"primary",color:"#1565C0",action:{type:"message",label:"挨拶確認",text:"挨拶確認"}}
-]}
+{type:"button",action:{type:"message",label:"連投制限",text:"連投制限 5"}},
+{type:"button",action:{type:"message",label:"状態確認",text:"状態確認"}},
+
+{type:"button",action:{type:"message",label:"挨拶ON",text:"挨拶ON"}},
+{type:"button",action:{type:"message",label:"挨拶OFF",text:"挨拶OFF"}},
+{type:"button",action:{type:"message",label:"挨拶登録",text:"挨拶登録 ようこそ！"}},
+{type:"button",action:{type:"message",label:"挨拶確認",text:"挨拶確認"}}
 
 ]
 }
@@ -188,12 +177,10 @@ return send(e,{type:"text",text:"管理追加OK"});
 
 // ===== 管理削除 =====
 if(t.startsWith("管理削除")){
-if(!(await isAdmin(g,u))) return send(e,{type:"text",text:"管理者のみ"});
 const target=getMention(e);
 if(target===OWNER) return send(e,{type:"text",text:"削除不可"});
 const rows=await getSheet("admins!A:B");
 const filtered=rows.filter(x=>!(x[0]===g&&x[1]===target));
-await sheets.spreadsheets.values.clear({spreadsheetId:sheetId,range:"admins!A:B"});
 await sheets.spreadsheets.values.update({
 spreadsheetId:sheetId,
 range:"admins!A:B",
@@ -203,37 +190,14 @@ requestBody:{values:filtered}
 return send(e,{type:"text",text:"削除OK"});
 }
 
-// ===== 管理一覧（名前）=====
+// ===== 管理一覧 =====
 if(t==="管理一覧"){
 const rows=await getSheet("admins!A:B");
-const list=rows.filter(x=>x[0]===g);
-
-const contents=[];
-for(const r of list){
-let name=r[1];
-try{
-const p=await client.getGroupMemberProfile(g,r[1]);
-name=p.displayName;
-}catch{}
-contents.push({type:"text",text:name,size:"sm"});
-}
-
-return send(e,{
-type:"flex",
-altText:"管理一覧",
-contents:{
-type:"bubble",
-body:{type:"box",layout:"vertical",contents:[
-{type:"text",text:"管理一覧",weight:"bold"},
-...contents
-]}
-}
-});
+return send(e,{type:"text",text:rows.filter(x=>x[0]===g).map(x=>x[1]).join("\n")||"なし"});
 }
 
 // ===== 副管理 =====
 if(t.startsWith("副管理追加")){
-if(!(await isAdmin(g,u))) return send(e,{type:"text",text:"管理者のみ"});
 const target=getMention(e);
 await sheets.spreadsheets.values.append({
 spreadsheetId:sheetId,
@@ -248,7 +212,6 @@ if(t.startsWith("副管理削除")){
 const target=getMention(e);
 const rows=await getSheet("subs!A:B");
 const filtered=rows.filter(x=>!(x[0]===g&&x[1]===target));
-await sheets.spreadsheets.values.clear({spreadsheetId:sheetId,range:"subs!A:B"});
 await sheets.spreadsheets.values.update({
 spreadsheetId:sheetId,
 range:"subs!A:B",
@@ -265,7 +228,6 @@ return send(e,{type:"text",text:r.filter(x=>x[0]===g).map(x=>x[1]).join("\n")||"
 
 // ===== NG =====
 if(t.startsWith("NG追加")){
-if(!(await isAdmin(g,u))) return send(e,{type:"text",text:"権限なし"});
 const w=t.replace("NG追加","").trim();
 await sheets.spreadsheets.values.append({
 spreadsheetId:sheetId,
@@ -280,7 +242,6 @@ if(t.startsWith("NG削除")){
 const w=t.replace("NG削除","").trim();
 const rows=await getSheet("ng!A:B");
 const filtered=rows.filter(x=>!(x[0]===g&&x[1]===w));
-await sheets.spreadsheets.values.clear({spreadsheetId:sheetId,range:"ng!A:B"});
 await sheets.spreadsheets.values.update({
 spreadsheetId:sheetId,
 range:"ng!A:B",
@@ -319,6 +280,11 @@ return send(e,{type:"text",text:`状態:${set[2]}\n内容:${set[3]}`});
 }
 
 }
+
+}catch(err){
+console.log("致命エラー:",err);
+}
+
 res.sendStatus(200);
 });
 
