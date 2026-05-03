@@ -34,8 +34,11 @@ const sheetId = process.env.SPREADSHEET_ID;
 
 // ===== 固定 =====
 const OWNER = "U1a1aca9e44466f8cb05003d7dc86fee0";
+const PASS = "1234";
 
 // ===== util =====
+const getMention = e => e.message.mention?.mentionees?.[0]?.userId;
+
 const getSheet = async (range) => {
   try {
     const res = await sheets.spreadsheets.values.get({
@@ -67,7 +70,7 @@ if(!e.source.groupId) continue;
 const g = e.source.groupId;
 const u = e.source.userId;
 
-// ===== BANチェック（postbackは通す）=====
+// ===== BAN制御（postbackは通す）=====
 const isAdminUser = await isAdmin(g,u);
 const banList = await getSheet("ban!A:B");
 const banned = banList.some(x=>x[0]===g && x[1]===u);
@@ -79,7 +82,6 @@ if(e.type !== "postback" && banned && !isAdminUser){
 
 // ===== postback =====
 if(e.type==="postback"){
-
 const d = e.postback.data;
 
 // ===== 管理削除確認 =====
@@ -182,7 +184,7 @@ if(e.type!=="message"||e.message.type!=="text") continue;
 
 const t = e.message.text.trim();
 
-// ===== menu =====
+// ===== 完全メニュー =====
 if(t==="menu"){
 return send(e,{
 type:"flex",
@@ -193,20 +195,44 @@ body:{
 type:"box",
 layout:"vertical",
 contents:[
+
 {type:"text",text:"管理メニュー",weight:"bold",size:"lg"},
 
 ...[
-["管理一覧","NG一覧"],
-["BAN一覧","状態確認"]
+["管理登録 1234","管理一覧"],
+["管理追加","管理削除"],
+["副管理追加","副管理削除"],
+["副管理一覧","状態確認"],
+["NG追加 test","NG一覧"],
+["NG削除 test","連投制限 5"],
+["BAN追加","BAN解除"],
+["BAN一覧","状態確認"],
+["挨拶ON","挨拶OFF"],
+["挨拶登録 ようこそ！","挨拶確認"]
 ].map(row=>({
 type:"box",
 layout:"horizontal",
-contents:row.map(txt=>({
+spacing:"sm",
+contents:row.map(txt=>{
+
+let color="#1565C0";
+if(txt.includes("削除")) color="#D32F2F";
+if(txt.includes("BAN")) color="#000000";
+if(txt.includes("解除")) color="#2E7D32";
+if(txt.includes("NG")) color="#D32F2F";
+
+return {
 type:"button",
 style:"primary",
-color:"#1565C0",
-action:{type:"message",label:txt,text:txt}
-}))
+color,
+flex:1,
+action:{
+type:"message",
+label:txt.split(" ")[0],
+text:txt
+}
+};
+})
 }))
 ]
 }
@@ -216,12 +242,12 @@ action:{type:"message",label:txt,text:txt}
 
 // ===== 状態確認 =====
 if(t.includes("状態確認")){
-const settings = await getSheet("settings!A:D");
-const row = settings.find(x=>x[0]===g);
+const s = await getSheet("settings!A:D");
+const row = s.find(x=>x[0]===g);
 
 return send(e,{
 type:"text",
-text:`📊 状態\n連投制限: ${row?.[1] || "未設定"}\n挨拶: ${row?.[2] || "OFF"}`
+text:`📊 状態\n連投制限:${row?.[1]||"未設定"}\n挨拶:${row?.[2]||"OFF"}`
 });
 }
 
@@ -279,7 +305,17 @@ if(t.includes("NG一覧")){
 const rows = await getSheet("ng!A:B");
 const list = rows.filter(x=>x[0]===g);
 
-const contents = list.map(r=>({
+return send(e,{
+type:"flex",
+altText:"NG一覧",
+contents:{
+type:"bubble",
+body:{
+type:"box",
+layout:"vertical",
+contents:[
+{type:"text",text:"NG一覧",weight:"bold"},
+...list.map(r=>({
 type:"box",
 layout:"horizontal",
 justifyContent:"space-between",
@@ -292,17 +328,9 @@ color:"#D32F2F",
 action:{type:"postback",label:"削除",data:`ng_delete:${r[1]}`}
 }
 ]
-}));
-
-return send(e,{
-type:"flex",
-altText:"NG一覧",
-contents:{
-type:"bubble",
-body:{type:"box",layout:"vertical",contents:[
-{type:"text",text:"NG一覧",weight:"bold"},
-...contents
-]}
+}))
+]
+}
 }
 });
 }
