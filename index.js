@@ -4,26 +4,19 @@ import { google } from "googleapis";
 
 const app = express();
 
-// ===== LINE =====
 const config = {
   channelAccessToken: process.env.CHANNEL_ACCESS_TOKEN,
   channelSecret: process.env.CHANNEL_SECRET
 };
 const client = new Client(config);
 
-// ===== reply安全化 =====
-const safeReply = async (event, messages) => {
+// ===== 安全返信 =====
+const send = async (event, msg) => {
   try {
-    await client.replyMessage(event.replyToken, messages);
-  } catch (e) {
-    // 期限切れなど → pushでフォールバック
-    try {
-      const userId = event.source?.userId;
-      if (userId) {
-        await client.pushMessage(userId, messages);
-      }
-    } catch (e2) {
-      console.log("reply/push error", e2);
+    await client.replyMessage(event.replyToken, msg);
+  } catch {
+    if (event.source.userId) {
+      await client.pushMessage(event.source.userId, msg);
     }
   }
 };
@@ -37,476 +30,248 @@ const auth = new google.auth.JWT(
 );
 
 const sheets = google.sheets({ version: "v4", auth });
-const spreadsheetId = process.env.SPREADSHEET_ID;
+const sheetId = process.env.SPREADSHEET_ID;
 
-// ===== 固定 =====
-const OWNER_ID = "U1a1aca9e44466f8cb05003d7dc86fee0";
-const ADMIN_PASS = "1234";
+const OWNER = "U1a1aca9e44466f8cb05003d7dc86fee0";
+const PASS = "1234";
 
-// ===== ユーティリティ =====
-const toRows = (res) => res.data.values || [];
-const lastRowByGroup = (rows, groupId) =>
-  rows.slice().reverse().find(r => r[0] === groupId);
+// ===== util =====
+const getMention = e => e.message.mention?.mentionees?.[0]?.userId;
+const getSheet = async r => (await sheets.spreadsheets.values.get({ spreadsheetId: sheetId, range: r })).data.values || [];
 
-const getMention = (event) => {
-  const m = event.message.mention;
-  if (!m || !m.mentionees?.length) return null;
-  return m.mentionees[0].userId;
-};
-
-// ===== settings（append前提で最後の行を採用）=====
-async function getSettings(groupId) {
-  const res = await sheets.spreadsheets.values.get({
-    spreadsheetId,
-    range: "settings!A:D"
-  });
-  const rows = toRows(res);
-  return lastRowByGroup(rows, groupId);
+// ===== settings =====
+async function getSetting(g){
+  const rows = await getSheet("settings!A:D");
+  return rows.reverse().find(r=>r[0]===g) || [g,5,"ON","ようこそ！"];
 }
-
-async function ensureSettings(groupId) {
-  const s = await getSettings(groupId);
-  if (!s) {
-    await sheets.spreadsheets.values.append({
-      spreadsheetId,
-      range: "settings!A:D",
-      valueInputOption: "RAW",
-      requestBody: { values: [[groupId, "5", "ON", "ようこそ！"]] }
-    });
-  }
-}
-
-async function appendSettings(groupId, limit, greet, greetText) {
+async function setSetting(g,l,gr,t){
   await sheets.spreadsheets.values.append({
-    spreadsheetId,
-    range: "settings!A:D",
-    valueInputOption: "RAW",
-    requestBody: { values: [[groupId, String(limit), greet, greetText || ""]] }
+    spreadsheetId:sheetId,
+    range:"settings!A:D",
+    valueInputOption:"RAW",
+    requestBody:{values:[[g,l,gr,t]]}
   });
 }
 
 // ===== 管理 =====
-async function getAdmins() {
-  const res = await sheets.spreadsheets.values.get({
-    spreadsheetId,
-    range: "admins!A:C"
-  });
-  return toRows(res);
+async function isAdmin(g,u){
+  if(u===OWNER) return true;
+  const r = await getSheet("admins!A:B");
+  return r.some(x=>x[0]===g && x[1]===u);
 }
-
-async function isAdmin(groupId, userId) {
-  if (userId === OWNER_ID) return true;
-  const rows = await getAdmins();
-  return rows.some(r => r[0] === groupId && r[1] === userId);
+async function isSub(g,u){
+  const r = await getSheet("subs!A:B");
+  return r.some(x=>x[0]===g && x[1]===u);
 }
+const isManager = async (g,u)=> (await isAdmin(g,u)) || (await isSub(g,u));
 
-async function getSubs() {
-  const res = await sheets.spreadsheets.values.get({
-    spreadsheetId,
-    range: "subs!A:B"
-  });
-  return toRows(res);
-}
+// ===== Webhook =====
+app.post("/webhook", middleware(config), async (req,res)=>{
 
-async function isSub(groupId, userId) {
-  const rows = await getSubs();
-  return rows.some(r => r[0] === groupId && r[1] === userId);
-}
+for(const e of req.body.events){
 
-async function isManager(groupId, userId) {
-  return (await isAdmin(groupId, userId)) || (await isSub(groupId, userId));
-}
+if(!e.source.groupId) continue;
 
-async function addAdmin(groupId, userId, name = "管理者") {
-  await sheets.spreadsheets.values.append({
-    spreadsheetId,
-    range: "admins!A:C",
-    valueInputOption: "RAW",
-    requestBody: { values: [[groupId, userId, name]] }
-  });
-}
+const g = e.source.groupId;
+const u = e.source.userId;
+const set = await getSetting(g);
 
-async function removeAdmin(groupId, targetId) {
-  const rows = await getAdmins();
-  const filtered = rows.filter(r => !(r[0] === groupId && r[1] === targetId));
-  await sheets.spreadsheets.values.clear({
-    spreadsheetId,
-    range: "admins!A:C"
-  });
-  if (filtered.length) {
-    await sheets.spreadsheets.values.update({
-      spreadsheetId,
-      range: "admins!A:C",
-      valueInputOption: "RAW",
-      requestBody: { values: filtered }
-    });
+// ===== 入室挨拶 =====
+if(e.type==="memberJoined"){
+  if(set[2]==="ON"){
+    await send(e,{type:"text",text:set[3]});
   }
+  continue;
 }
 
-async function addSub(groupId, userId) {
-  await sheets.spreadsheets.values.append({
-    spreadsheetId,
-    range: "subs!A:B",
-    valueInputOption: "RAW",
-    requestBody: { values: [[groupId, userId]] }
-  });
+if(e.type!=="message"||e.message.type!=="text") continue;
+
+const t = e.message.text.trim();
+
+// ===== menu =====
+if(t==="menu"){
+await send(e,{
+type:"flex",
+altText:"管理メニュー",
+contents:{
+type:"bubble",
+size:"mega",
+body:{
+type:"box",
+layout:"vertical",
+spacing:"md",
+contents:[
+
+{type:"box",layout:"vertical",backgroundColor:"#0D47A1",paddingAll:"10px",
+contents:[{type:"text",text:"管理メニュー",color:"#fff",align:"center",weight:"bold"}]},
+
+// 管理
+{type:"box",layout:"horizontal",contents:[
+{type:"button",style:"primary",color:"#1565C0",action:{type:"message",label:"管理登録",text:"管理登録 1234"}},
+{type:"button",style:"primary",color:"#1565C0",action:{type:"message",label:"管理一覧",text:"管理一覧"}}
+]},
+{type:"box",layout:"horizontal",contents:[
+{type:"button",style:"primary",color:"#1565C0",action:{type:"message",label:"管理追加",text:"管理追加 @"}},
+{type:"button",style:"primary",color:"#1565C0",action:{type:"message",label:"管理削除",text:"管理削除 @"}}
+]},
+
+// 副管理
+{type:"box",layout:"horizontal",contents:[
+{type:"button",style:"primary",color:"#1565C0",action:{type:"message",label:"副管理追加",text:"副管理追加 @"}},
+{type:"button",style:"primary",color:"#1565C0",action:{type:"message",label:"副管理削除",text:"副管理削除 @"}}
+]},
+{type:"box",layout:"horizontal",contents:[
+{type:"button",style:"primary",color:"#1565C0",action:{type:"message",label:"副管理一覧",text:"副管理一覧"}},
+{type:"button",style:"primary",color:"#1565C0",action:{type:"message",label:"状態確認",text:"状態確認"}}
+]},
+
+// NG
+{type:"box",layout:"horizontal",contents:[
+{type:"button",style:"primary",color:"#D32F2F",action:{type:"message",label:"NG追加",text:"NG追加 test"}},
+{type:"button",style:"primary",color:"#1565C0",action:{type:"message",label:"NG一覧",text:"NG一覧"}}
+]},
+{type:"box",layout:"horizontal",contents:[
+{type:"button",style:"primary",color:"#1565C0",action:{type:"message",label:"NG削除",text:"NG削除 test"}},
+{type:"button",style:"primary",color:"#1565C0",action:{type:"message",label:"連投制限",text:"連投制限 5"}}
+]},
+
+// 挨拶（黒ボタン白文字）
+{type:"box",layout:"horizontal",contents:[
+{type:"button",style:"primary",color:"#212121",action:{type:"message",label:"挨拶ON",text:"挨拶ON"}},
+{type:"button",style:"primary",color:"#424242",action:{type:"message",label:"挨拶OFF",text:"挨拶OFF"}}
+]},
+{type:"box",layout:"horizontal",contents:[
+{type:"button",style:"primary",color:"#1565C0",action:{type:"message",label:"挨拶登録",text:"挨拶登録 ようこそ！"}},
+{type:"button",style:"primary",color:"#1565C0",action:{type:"message",label:"挨拶確認",text:"挨拶確認"}}
+]}
+
+]}}});
+continue;
 }
 
-async function removeSub(groupId, targetId) {
-  const rows = await getSubs();
-  const filtered = rows.filter(r => !(r[0] === groupId && r[1] === targetId));
-  await sheets.spreadsheets.values.clear({
-    spreadsheetId,
-    range: "subs!A:B"
-  });
-  if (filtered.length) {
-    await sheets.spreadsheets.values.update({
-      spreadsheetId,
-      range: "subs!A:B",
-      valueInputOption: "RAW",
-      requestBody: { values: filtered }
-    });
-  }
+// ===== 管理登録 =====
+if(t.startsWith("管理登録")){
+if(t.split(" ")[1]!==PASS) return send(e,{type:"text",text:"パス違い"});
+await sheets.spreadsheets.values.append({spreadsheetId:sheetId,range:"admins!A:C",valueInputOption:"RAW",requestBody:{values:[[g,u,"管理者"]]}})
+await send(e,{type:"text",text:"登録OK"});
+continue;
+}
+
+// ===== 管理追加 =====
+if(t.startsWith("管理追加")){
+if(!(await isAdmin(g,u))) return send(e,{type:"text",text:"管理者のみ"});
+const target=getMention(e);
+if(!target) return send(e,{type:"text",text:"メンションして"});
+await sheets.spreadsheets.values.append({spreadsheetId:sheetId,range:"admins!A:C",valueInputOption:"RAW",requestBody:{values:[[g,target,"追加"]]}})
+await send(e,{type:"text",text:"管理追加OK"});
+continue;
+}
+
+// ===== 管理削除 =====
+if(t.startsWith("管理削除")){
+if(!(await isAdmin(g,u))) return send(e,{type:"text",text:"管理者のみ"});
+const target=getMention(e);
+if(target===OWNER) return send(e,{type:"text",text:"削除不可"});
+const rows=await getSheet("admins!A:B");
+const filtered=rows.filter(x=>!(x[0]===g&&x[1]===target));
+await sheets.spreadsheets.values.clear({spreadsheetId:sheetId,range:"admins!A:B"});
+await sheets.spreadsheets.values.update({spreadsheetId:sheetId,range:"admins!A:B",valueInputOption:"RAW",requestBody:{values:filtered}});
+await send(e,{type:"text",text:"削除OK"});
+continue;
+}
+
+// ===== 管理一覧 =====
+if(t==="管理一覧"){
+const r=await getSheet("admins!A:B");
+const list=r.filter(x=>x[0]===g).map(x=>x[1]);
+await send(e,{type:"text",text:list.join("\n")||"なし"});
+continue;
+}
+
+// ===== 副管理追加 =====
+if(t.startsWith("副管理追加")){
+if(!(await isAdmin(g,u))) return send(e,{type:"text",text:"管理者のみ"});
+const target=getMention(e);
+await sheets.spreadsheets.values.append({spreadsheetId:sheetId,range:"subs!A:B",valueInputOption:"RAW",requestBody:{values:[[g,target]]}})
+await send(e,{type:"text",text:"副管理追加OK"});
+continue;
+}
+
+// ===== 副管理削除 =====
+if(t.startsWith("副管理削除")){
+const target=getMention(e);
+const rows=await getSheet("subs!A:B");
+const filtered=rows.filter(x=>!(x[0]===g&&x[1]===target));
+await sheets.spreadsheets.values.clear({spreadsheetId:sheetId,range:"subs!A:B"});
+await sheets.spreadsheets.values.update({spreadsheetId:sheetId,range:"subs!A:B",valueInputOption:"RAW",requestBody:{values:filtered}});
+await send(e,{type:"text",text:"削除OK"});
+continue;
+}
+
+// ===== 副管理一覧 =====
+if(t==="副管理一覧"){
+const r=await getSheet("subs!A:B");
+const list=r.filter(x=>x[0]===g).map(x=>x[1]);
+await send(e,{type:"text",text:list.join("\n")||"なし"});
+continue;
 }
 
 // ===== NG =====
-async function getNG(groupId) {
-  const res = await sheets.spreadsheets.values.get({
-    spreadsheetId,
-    range: "ng!A:B"
-  });
-  const rows = toRows(res);
-  return rows.filter(r => r[0] === groupId).map(r => r[1]);
+if(t.startsWith("NG追加")){
+if(!(await isAdmin(g,u))) return send(e,{type:"text",text:"権限なし"});
+const w=t.replace("NG追加","").trim();
+await sheets.spreadsheets.values.append({spreadsheetId:sheetId,range:"ng!A:B",valueInputOption:"RAW",requestBody:{values:[[g,w]]}})
+await send(e,{type:"text",text:"追加OK"});
+continue;
 }
 
-async function addNG(groupId, word) {
-  await sheets.spreadsheets.values.append({
-    spreadsheetId,
-    range: "ng!A:B",
-    valueInputOption: "RAW",
-    requestBody: { values: [[groupId, word]] }
-  });
+if(t.startsWith("NG削除")){
+const w=t.replace("NG削除","").trim();
+const rows=await getSheet("ng!A:B");
+const filtered=rows.filter(x=>!(x[0]===g&&x[1]===w));
+await sheets.spreadsheets.values.clear({spreadsheetId:sheetId,range:"ng!A:B"});
+await sheets.spreadsheets.values.update({spreadsheetId:sheetId,range:"ng!A:B",valueInputOption:"RAW",requestBody:{values:filtered}});
+await send(e,{type:"text",text:"削除OK"});
+continue;
 }
 
-async function removeNG(groupId, word) {
-  const res = await sheets.spreadsheets.values.get({
-    spreadsheetId,
-    range: "ng!A:B"
-  });
-  const rows = toRows(res);
-  const filtered = rows.filter(r => !(r[0] === groupId && r[1] === word));
-  await sheets.spreadsheets.values.clear({
-    spreadsheetId,
-    range: "ng!A:B"
-  });
-  if (filtered.length) {
-    await sheets.spreadsheets.values.update({
-      spreadsheetId,
-      range: "ng!A:B",
-      valueInputOption: "RAW",
-      requestBody: { values: filtered }
-    });
-  }
+if(t==="NG一覧"){
+const r=await getSheet("ng!A:B");
+const list=r.filter(x=>x[0]===g).map(x=>x[1]);
+await send(e,{type:"text",text:list.join("\n")||"なし"});
+continue;
 }
 
-// ===== UI（2列・黒は白文字）=====
-const menuFlex = {
-  type: "flex",
-  altText: "管理メニュー",
-  contents: {
-    type: "bubble",
-    size: "mega",
-    body: {
-      type: "box",
-      layout: "vertical",
-      spacing: "md",
-      contents: [
-        {
-          type: "box",
-          layout: "vertical",
-          backgroundColor: "#0D47A1",
-          paddingAll: "12px",
-          contents: [
-            { type: "text", text: "管理メニュー", color: "#FFFFFF", weight: "bold", align: "center", size: "lg" }
-          ]
-        },
+// ===== 連投 =====
+if(t.startsWith("連投制限")){
+const num=t.replace("連投制限","").trim();
+await setSetting(g,num,set[2],set[3]);
+await send(e,{type:"text",text:"設定OK"});
+continue;
+}
 
-        // 管理
-        {
-          type: "box", layout: "horizontal", spacing: "sm", contents: [
-            { type: "button", style: "primary", color: "#1565C0", action: { type: "message", label: "管理登録", text: "管理登録 1234" } },
-            { type: "button", style: "primary", color: "#1565C0", action: { type: "message", label: "管理一覧", text: "管理一覧" } }
-          ]
-        },
-        {
-          type: "box", layout: "horizontal", spacing: "sm", contents: [
-            { type: "button", style: "primary", color: "#1565C0", action: { type: "message", label: "管理削除", text: "管理削除 @" } },
-            { type: "button", style: "primary", color: "#1565C0", action: { type: "message", label: "副管理一覧", text: "副管理一覧" } }
-          ]
-        },
-        {
-          type: "box", layout: "horizontal", spacing: "sm", contents: [
-            { type: "button", style: "primary", color: "#1565C0", action: { type: "message", label: "副管理追加", text: "副管理追加 @" } },
-            { type: "button", style: "primary", color: "#1565C0", action: { type: "message", label: "副管理削除", text: "副管理削除 @" } }
-          ]
-        },
+// ===== 状態 =====
+if(t==="状態確認"){
+await send(e,{type:"text",text:`制限:${set[1]}\n挨拶:${set[2]}`});
+continue;
+}
 
-        // NG
-        {
-          type: "box", layout: "horizontal", spacing: "sm", contents: [
-            { type: "button", style: "primary", color: "#D32F2F", action: { type: "message", label: "NG追加", text: "NG追加 test" } },
-            { type: "button", style: "primary", color: "#1565C0", action: { type: "message", label: "NG一覧", text: "NG一覧" } }
-          ]
-        },
-        {
-          type: "box", layout: "horizontal", spacing: "sm", contents: [
-            { type: "button", style: "primary", color: "#1565C0", action: { type: "message", label: "NG削除", text: "NG削除 test" } },
-            { type: "button", style: "primary", color: "#1565C0", action: { type: "message", label: "状態確認", text: "状態確認" } }
-          ]
-        },
+// ===== 挨拶 =====
+if(t==="挨拶ON"){await setSetting(g,set[1],"ON",set[3]);await send(e,{type:"text",text:"ON"});continue;}
+if(t==="挨拶OFF"){await setSetting(g,set[1],"OFF",set[3]);await send(e,{type:"text",text:"OFF"});continue;}
+if(t.startsWith("挨拶登録")){
+const txt=t.replace("挨拶登録","").trim();
+await setSetting(g,set[1],set[2],txt);
+await send(e,{type:"text",text:"登録OK"});
+continue;
+}
+if(t==="挨拶確認"){
+await send(e,{type:"text",text:`状態:${set[2]}\n内容:${set[3]}`});
+continue;
+}
 
-        // 連投
-        {
-          type: "box", layout: "horizontal", contents: [
-            { type: "button", style: "primary", color: "#1565C0", action: { type: "message", label: "連投制限", text: "連投制限 5" } },
-            { type: "button", style: "primary", color: "#1565C0", action: { type: "message", label: "設定確認", text: "状態確認" } }
-          ]
-        },
-
-        // 挨拶（黒→白文字）
-        {
-          type: "box", layout: "horizontal", contents: [
-            { type: "button", style: "secondary", color: "#212121", action: { type: "message", label: "挨拶ON", text: "挨拶ON" } },
-            { type: "button", style: "secondary", color: "#424242", action: { type: "message", label: "挨拶OFF", text: "挨拶OFF" } }
-          ]
-        },
-        {
-          type: "box", layout: "horizontal", contents: [
-            { type: "button", style: "primary", color: "#1565C0", action: { type: "message", label: "挨拶登録", text: "挨拶登録 ようこそ！" } },
-            { type: "button", style: "primary", color: "#1565C0", action: { type: "message", label: "挨拶確認", text: "挨拶確認" } }
-          ]
-        }
-      ]
-    }
-  }
-};
-
-// ===== Webhook =====
-app.post("/webhook", middleware(config), async (req, res) => {
-  for (const event of req.body.events) {
-
-    if (!event.source.groupId) continue;
-
-    const groupId = event.source.groupId;
-    const userId = event.source.userId;
-
-    await ensureSettings(groupId);
-    const setting = await getSettings(groupId); // [groupId, limit, greet, greetText]
-
-    if (event.type === "memberJoined") {
-      // 入室時挨拶
-      if (setting?.[2] === "ON") {
-        const text = setting?.[3] || "ようこそ！";
-        await safeReply(event, { type: "text", text });
-      }
-      continue;
-    }
-
-    if (event.type !== "message" || event.message.type !== "text") continue;
-
-    const text = event.message.text.trim();
-
-    // ===== menu =====
-    if (text === "menu") {
-      await safeReply(event, menuFlex);
-      continue;
-    }
-
-    // ===== 管理登録 =====
-    if (text.startsWith("管理登録")) {
-      const pass = text.replace("管理登録","").trim();
-      if (pass !== ADMIN_PASS) {
-        await safeReply(event, { type: "text", text: "パス違い" });
-        continue;
-      }
-      await addAdmin(groupId, userId, "管理者");
-      await safeReply(event, { type: "text", text: "管理者登録OK" });
-      continue;
-    }
-
-    // ===== 管理一覧 =====
-    if (text === "管理一覧") {
-      const rows = await getAdmins();
-      const list = rows
-        .filter(r => r[0] === groupId)
-        .map(r => r[1]);
-      await safeReply(event, { type: "text", text: list.join("\n") || "なし" });
-      continue;
-    }
-
-    // ===== 管理削除 =====
-    if (text.startsWith("管理削除")) {
-      if (!(await isAdmin(groupId, userId))) {
-        await safeReply(event, { type: "text", text: "管理者のみ" });
-        continue;
-      }
-      const target = getMention(event);
-      if (!target) {
-        await safeReply(event, { type: "text", text: "メンションして" });
-        continue;
-      }
-      if (target === OWNER_ID) {
-        await safeReply(event, { type: "text", text: "オーナー削除不可" });
-        continue;
-      }
-      await removeAdmin(groupId, target);
-      await safeReply(event, { type: "text", text: "管理削除OK" });
-      continue;
-    }
-
-    // ===== 副管理追加 =====
-    if (text.startsWith("副管理追加")) {
-      if (!(await isAdmin(groupId, userId))) {
-        await safeReply(event, { type: "text", text: "管理者のみ" });
-        continue;
-      }
-      const target = getMention(event);
-      if (!target) {
-        await safeReply(event, { type: "text", text: "メンションして" });
-        continue;
-      }
-      await addSub(groupId, target);
-      await safeReply(event, { type: "text", text: "副管理追加OK" });
-      continue;
-    }
-
-    // ===== 副管理一覧 =====
-    if (text === "副管理一覧") {
-      const rows = await getSubs();
-      const list = rows.filter(r => r[0] === groupId).map(r => r[1]);
-      await safeReply(event, { type: "text", text: list.join("\n") || "なし" });
-      continue;
-    }
-
-    // ===== 副管理削除 =====
-    if (text.startsWith("副管理削除")) {
-      if (!(await isAdmin(groupId, userId))) {
-        await safeReply(event, { type: "text", text: "管理者のみ" });
-        continue;
-      }
-      const target = getMention(event);
-      if (!target) {
-        await safeReply(event, { type: "text", text: "メンションして" });
-        continue;
-      }
-      await removeSub(groupId, target);
-      await safeReply(event, { type: "text", text: "副管理削除OK" });
-      continue;
-    }
-
-    // ===== NG追加 =====
-    if (text.startsWith("NG追加")) {
-      if (!(await isAdmin(groupId, userId))) {
-        await safeReply(event, { type: "text", text: "権限なし" });
-        continue;
-      }
-      const word = text.replace("NG追加","").trim();
-      if (!word) {
-        await safeReply(event, { type: "text", text: "入力して" });
-        continue;
-      }
-      await addNG(groupId, word);
-      await safeReply(event, { type: "text", text: "NG追加OK" });
-      continue;
-    }
-
-    // ===== NG一覧 =====
-    if (text === "NG一覧") {
-      const list = await getNG(groupId);
-      await safeReply(event, { type: "text", text: list.join("\n") || "なし" });
-      continue;
-    }
-
-    // ===== NG削除 =====
-    if (text.startsWith("NG削除")) {
-      if (!(await isAdmin(groupId, userId))) {
-        await safeReply(event, { type: "text", text: "権限なし" });
-        continue;
-      }
-      const word = text.replace("NG削除","").trim();
-      if (!word) {
-        await safeReply(event, { type: "text", text: "入力して" });
-        continue;
-      }
-      await removeNG(groupId, word);
-      await safeReply(event, { type: "text", text: "NG削除OK" });
-      continue;
-    }
-
-    // ===== 状態確認 =====
-    if (text === "状態確認") {
-      await safeReply(event, {
-        type: "text",
-        text: `制限:${setting?.[1]}\n挨拶:${setting?.[2]}`
-      });
-      continue;
-    }
-
-    // ===== 連投制限 =====
-    if (text.startsWith("連投制限")) {
-      if (!(await isManager(groupId, userId))) {
-        await safeReply(event, { type: "text", text: "権限なし" });
-        continue;
-      }
-      const num = text.replace("連投制限","").trim();
-      const limit = Number(num) || 5;
-      await appendSettings(groupId, limit, setting?.[2] || "ON", setting?.[3] || "");
-      await safeReply(event, { type: "text", text: "設定OK" });
-      continue;
-    }
-
-    // ===== 挨拶ON/OFF =====
-    if (text === "挨拶ON") {
-      await appendSettings(groupId, setting?.[1] || "5", "ON", setting?.[3] || "");
-      await safeReply(event, { type: "text", text: "ON" });
-      continue;
-    }
-
-    if (text === "挨拶OFF") {
-      await appendSettings(groupId, setting?.[1] || "5", "OFF", setting?.[3] || "");
-      await safeReply(event, { type: "text", text: "OFF" });
-      continue;
-    }
-
-    // ===== 挨拶登録 =====
-    if (text.startsWith("挨拶登録")) {
-      if (!(await isAdmin(groupId, userId))) {
-        await safeReply(event, { type: "text", text: "権限なし" });
-        continue;
-      }
-      const greetText = text.replace("挨拶登録","").trim();
-      if (!greetText) {
-        await safeReply(event, { type: "text", text: "内容入れて" });
-        continue;
-      }
-      await appendSettings(groupId, setting?.[1] || "5", setting?.[2] || "ON", greetText);
-      await safeReply(event, { type: "text", text: "挨拶登録OK" });
-      continue;
-    }
-
-    // ===== 挨拶確認 =====
-    if (text === "挨拶確認") {
-      const greetText = setting?.[3] || "未設定";
-      await safeReply(event, {
-        type: "text",
-        text: `状態:${setting?.[2]}\n内容:${greetText}`
-      });
-      continue;
-    }
-
-  }
-
-  res.sendStatus(200);
+}
+res.sendStatus(200);
 });
 
 app.listen(3000);
