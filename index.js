@@ -1,17 +1,17 @@
 import express from "express";
-import line from "@line/bot-sdk";
+import * as line from "@line/bot-sdk";
 import { google } from "googleapis";
 
 const app = express();
 
-// ================= LINE =================
+// ===== LINE =====
 const config = {
   channelAccessToken: process.env.CHANNEL_ACCESS_TOKEN,
   channelSecret: process.env.CHANNEL_SECRET
 };
 const client = new line.Client(config);
 
-// ================= Sheets =================
+// ===== Google Sheets =====
 const auth = new google.auth.JWT(
   process.env.GOOGLE_CLIENT_EMAIL,
   null,
@@ -22,10 +22,10 @@ const auth = new google.auth.JWT(
 const sheets = google.sheets({ version: "v4", auth });
 const SPREADSHEET_ID = process.env.SPREADSHEET_ID;
 
-// ================= 設定 =================
+// ===== 設定 =====
 const OWNER = "U1a1aca9e44466f8cb05003d7dc86fee0";
 
-// ================= 共通 =================
+// ===== 共通 =====
 const get = async (name) => {
   const r = await sheets.spreadsheets.values.get({
     spreadsheetId: SPREADSHEET_ID,
@@ -69,13 +69,13 @@ const isAdmin = async (id) => {
   return [...admins, ...subs].some(r => r[0] === id);
 };
 
-// ================= Webhook =================
+// ===== Webhook =====
 app.post("/webhook", line.middleware(config), async (req, res) => {
   await Promise.all(req.body.events.map(handle));
   res.sendStatus(200);
 });
 
-// ================= メイン =================
+// ===== メイン処理 =====
 async function handle(event) {
   if (event.type !== "message" || event.message.type !== "text") return;
 
@@ -116,35 +116,35 @@ async function handle(event) {
   // ===== 管理追加 =====
   if (text.startsWith("管理追加")) {
     if (!admin) return reply(event, "管理者のみ");
-    const mention = event.message.mention?.mentionees?.[0];
-    if (!mention) return reply(event, "@指定して");
-    await add("admins", [mention.userId, "管理者"]);
+    const m = event.message.mention?.mentionees?.[0];
+    if (!m) return reply(event, "@指定して");
+    await add("admins", [m.userId, "管理者"]);
     return reply(event, "管理者追加 OK");
   }
 
   // ===== 副管理追加 =====
   if (text.startsWith("副管理追加")) {
     if (!admin) return reply(event, "管理者のみ");
-    const mention = event.message.mention?.mentionees?.[0];
-    if (!mention) return reply(event, "@指定して");
-    await add("subs", [mention.userId, "副管理"]);
+    const m = event.message.mention?.mentionees?.[0];
+    if (!m) return reply(event, "@指定して");
+    await add("subs", [m.userId, "副管理"]);
     return reply(event, "副管理追加 OK");
   }
 
   // ===== 通報→BAN =====
   if (text.startsWith("通報")) {
     if (!admin) return reply(event, "管理者のみ");
-    const mention = event.message.mention?.mentionees?.[0];
-    if (!mention) return reply(event, "@指定して");
-    await add("ban", [mention.userId]);
+    const m = event.message.mention?.mentionees?.[0];
+    if (!m) return reply(event, "@指定して");
+    await add("ban", [m.userId]);
     return reply(event, "BAN完了");
   }
 
   // ===== BAN解除 =====
   if (text.startsWith("解除")) {
-    const mention = event.message.mention?.mentionees?.[0];
-    if (!mention) return reply(event, "@指定して");
-    await del("ban", mention.userId);
+    const m = event.message.mention?.mentionees?.[0];
+    if (!m) return reply(event, "@指定して");
+    await del("ban", m.userId);
     return reply(event, "BAN解除 OK");
   }
 
@@ -160,19 +160,20 @@ async function handle(event) {
 
   // ===== BAN一覧 =====
   if (text === "BAN一覧") {
-    return replyFlex(event, list("BAN一覧", await get("ban"), "BAN解除"));
+    return replyFlex(event, list("BAN一覧", await get("ban"), "解除"));
   }
 
   // ===== 連投制限 =====
   if (text.startsWith("連投制限")) {
-    await add("settings", ["limit", text.replace("連投制限","").trim()]);
+    const num = text.replace("連投制限","").trim();
+    await add("settings", ["limit", num]);
     return reply(event, "設定OK");
   }
 
   return;
 }
 
-// ================= Flex =================
+// ===== Flex UI =====
 const menu = () => ({
   type: "bubble",
   body: {
@@ -184,7 +185,7 @@ const menu = () => ({
       row("管理追加","管理削除"),
       row("副管理追加","副管理削除"),
       row("NG追加","通報"),
-      row("BAN解除","状態確認"),
+      row("解除","状態確認"),
       row("連投制限","挨拶ON"),
       row("挨拶OFF","挨拶確認")
     ]
@@ -230,9 +231,9 @@ const list = (title, rows, delCmd)=>({
   }
 });
 
-// ================= reply =================
+// ===== 返信 =====
 const reply = (e,t)=>client.replyMessage(e.replyToken,{type:"text",text:t});
 const replyFlex = (e,f)=>client.replyMessage(e.replyToken,{type:"flex",altText:"menu",contents:f});
 
-// ================= 起動 =================
+// ===== 起動 =====
 app.listen(process.env.PORT || 3000);
