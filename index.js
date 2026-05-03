@@ -62,18 +62,18 @@ const setSheet = async (range, values) => {
 };
 
 // ===== 権限 =====
-async function isAdmin(g,u){
+const isAdmin = async (g,u) => {
   if(u===OWNER) return true;
   const r = await getSheet("admins!A:B");
   return r.some(x=>x[0]===g && x[1]===u);
-}
+};
 
-async function isSub(g,u){
+const isSub = async (g,u) => {
   const r = await getSheet("subs!A:B");
   return r.some(x=>x[0]===g && x[1]===u);
-}
+};
 
-// ===== スパム =====
+// ===== spam =====
 const spamMap = {};
 
 // ===== Webhook =====
@@ -92,13 +92,43 @@ const u = e.source.userId;
 const admin = await isAdmin(g,u);
 const sub = await isSub(g,u);
 
-// ===== BAN =====
-const banList = await getSheet("ban!A:B");
-const banned = banList.some(x=>x[0]===g && x[1]===u);
+// =======================
+// 🔥 postback（ここが核心）
+// =======================
+if(e.type==="postback"){
+const d = e.postback.data;
 
-if(e.type!=="postback" && banned && !admin){
-  await send(e,{type:"text",text:"🚫 利用制限中"});
-  continue;
+// 管理削除
+if(d.startsWith("admin_delete:")){
+const id = d.split(":")[1];
+const rows = await getSheet("admins!A:B");
+await setSheet("admins!A:B", rows.filter(x=>!(x[0]===g && x[1]===id)));
+return send(e,{type:"text",text:"管理削除完了"});
+}
+
+// 副管理削除
+if(d.startsWith("sub_delete:")){
+const id = d.split(":")[1];
+const rows = await getSheet("subs!A:B");
+await setSheet("subs!A:B", rows.filter(x=>!(x[0]===g && x[1]===id)));
+return send(e,{type:"text",text:"副管理削除完了"});
+}
+
+// NG削除
+if(d.startsWith("ng_delete:")){
+const word = d.split(":")[1];
+const rows = await getSheet("ng!A:B");
+await setSheet("ng!A:B", rows.filter(x=>!(x[0]===g && x[1]===word)));
+return send(e,{type:"text",text:"NG削除完了"});
+}
+
+// BAN解除
+if(d.startsWith("ban_remove:")){
+const id = d.split(":")[1];
+const rows = await getSheet("ban!A:B");
+await setSheet("ban!A:B", rows.filter(x=>!(x[0]===g && x[1]===id)));
+return send(e,{type:"text",text:"BAN解除完了"});
+}
 }
 
 // ===== message =====
@@ -106,81 +136,19 @@ if(e.type!=="message"||e.message.type!=="text") continue;
 
 const t = e.message.text.trim();
 
-// ===== NG検知 =====
-const ng = await getSheet("ng!A:B");
-const ngWords = ng.filter(x=>x[0]===g).map(x=>x[1]);
-
-if(ngWords.some(w=>t.includes(w)) && !admin){
-  await send(e,{type:"text",text:"⚠️ NGワード検知"});
-  continue;
-}
-
-// ===== 連投 =====
+// ===== 連投制限 =====
 const now = Date.now();
 spamMap[g] = spamMap[g]||{};
 spamMap[g][u] = spamMap[g][u]||[];
-
 spamMap[g][u].push(now);
 spamMap[g][u] = spamMap[g][u].filter(ts=>now-ts<10000);
 
-const setting = await getSheet("settings!A:B");
-const row = setting.find(x=>x[0]===g);
+const set = await getSheet("settings!A:B");
+const row = set.find(x=>x[0]===g);
 const limit = Number(row?.[1]||5);
 
 if(spamMap[g][u].length>limit && !admin){
-  await send(e,{type:"text",text:"🚫 連投制限"});
-  continue;
-}
-
-// =========================
-// 🔥 MENU
-// =========================
-if(t==="menu"){
-return send(e,{
-type:"flex",
-altText:"管理メニュー",
-contents:{
-type:"bubble",
-body:{
-type:"box",
-layout:"vertical",
-contents:[
-{type:"text",text:"管理メニュー",weight:"bold",size:"lg"},
-
-...[
-["管理登録 1234","管理一覧"],
-["管理追加","管理削除"],
-["副管理追加","副管理削除"],
-["副管理一覧","状態確認"],
-["NG追加 test","NG一覧"],
-["NG削除 test","連投制限 5"],
-["BAN追加","BAN解除"],
-["BAN一覧","状態確認"],
-["挨拶ON","挨拶OFF"],
-["挨拶登録 ようこそ！","挨拶確認"]
-].map(row=>({
-type:"box",
-layout:"horizontal",
-contents:row.map(txt=>{
-
-let color="#1565C0";
-if(txt.includes("削除")||txt.includes("NG")) color="#D32F2F";
-if(txt.includes("BAN追加")||txt.includes("BAN一覧")) color="#000000";
-if(txt.includes("解除")) color="#2E7D32";
-
-return{
-type:"button",
-style:"primary",
-color,
-flex:1,
-action:{type:"message",label:txt.split(" ")[0],text:txt}
-};
-})
-}))
-]
-}
-}
-});
+return send(e,{type:"text",text:"🚫 連投制限"});
 }
 
 // ===== 管理登録 =====
@@ -266,7 +234,9 @@ contents:[
 type:"box",
 layout:"horizontal",
 contents:[
-{type:"text",text:r[1],flex:3}
+{type:"text",text:r[1],flex:3},
+{type:"button",style:"primary",color:"#F57C00",
+action:{type:"postback",label:"削除",data:`sub_delete:${r[1]}`}}
 ]
 }))
 ]
@@ -305,35 +275,12 @@ action:{type:"postback",label:"削除",data:`ng_delete:${r[1]}`}}
 });
 }
 
-// ===== BAN一覧 =====
-if(t==="BAN一覧"){
-const rows = await getSheet("ban!A:B");
-const list = rows.filter(x=>x[0]===g);
-if(!list.length) return send(e,{type:"text",text:"なし"});
-
-return send(e,{
-type:"flex",
-altText:"BAN一覧",
-contents:{
-type:"bubble",
-body:{
-type:"box",
-layout:"vertical",
-contents:[
-{type:"text",text:"BAN一覧",weight:"bold"},
-...list.map(r=>({
-type:"box",
-layout:"horizontal",
-contents:[
-{type:"text",text:r[1],flex:3},
-{type:"button",style:"primary",color:"#2E7D32",
-action:{type:"postback",label:"解除",data:`ban_remove:${r[1]}`}}
-]
-}))
-]
-}
-}
-});
+// ===== 連投制限設定 =====
+if(t.startsWith("連投制限")){
+if(!admin) return send(e,{type:"text",text:"権限なし"});
+const num = t.replace("連投制限","").trim();
+await setSheet("settings!A:B", [[g,num]]);
+return send(e,{type:"text",text:"設定OK"});
 }
 
 // ===== 状態確認 =====
@@ -341,10 +288,24 @@ if(t==="状態確認"){
 return send(e,{type:"text",text:`📊 状態\n連投制限:${limit}`});
 }
 
+// ===== 挨拶登録 =====
+if(t.startsWith("挨拶登録")){
+const msg = t.replace("挨拶登録","").trim();
+await setSheet("settings!A:C", [[g,limit,msg]]);
+return send(e,{type:"text",text:"挨拶登録OK"});
+}
+
+// ===== 挨拶確認 =====
+if(t==="挨拶確認"){
+const rows = await getSheet("settings!A:C");
+const r = rows.find(x=>x[0]===g);
+return send(e,{type:"text",text:r?.[2]||"未設定"});
+}
+
 }
 
 }catch(err){
-console.log(err);
+console.log("ERR:",err);
 }
 
 res.sendStatus(200);
