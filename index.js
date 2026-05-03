@@ -11,7 +11,7 @@ const config = {
 };
 const client = new Client(config);
 
-// ===== Google =====
+// ===== Google Sheets =====
 const auth = new google.auth.JWT(
   process.env.GOOGLE_CLIENT_EMAIL,
   null,
@@ -24,11 +24,6 @@ const spreadsheetId = process.env.SPREADSHEET_ID;
 
 // ===== 管理者 =====
 const OWNER = "U1a1aca9e44466f8cb05003d7dc86fee0";
-
-// ===== userId取得 =====
-async function getUserId(event) {
-  return event.source.userId;
-}
 
 // ===== 管理者判定 =====
 async function isAdmin(userId) {
@@ -80,7 +75,7 @@ async function remove(sheet, value) {
   }
 }
 
-// ===== メニュー（2列・色分け）=====
+// ===== メニュー =====
 function menu() {
   const rows = [
     ["管理一覧","副管理一覧","blue"],
@@ -133,7 +128,7 @@ function btn(label,type){
   };
 }
 
-// ===== 一覧Flex =====
+// ===== 一覧表示 =====
 function listFlex(title, list, cmd) {
   return {
     type: "flex",
@@ -169,24 +164,98 @@ function listFlex(title, list, cmd) {
 
 // ===== Webhook =====
 app.post("/webhook", middleware(config), async (req, res) => {
+
   for (const event of req.body.events) {
+
+    // ===== 入室挨拶 =====
+    if (event.type === "memberJoined") {
+      const resSheet = await sheets.spreadsheets.values.get({
+        spreadsheetId,
+        range: "settings!B1"
+      });
+
+      const greet = resSheet.data.values?.[0]?.[0];
+      if (greet !== "ON") continue;
+
+      await client.replyMessage(event.replyToken,{
+        type:"text",
+        text:"ようこそ！参加ありがとうございます😊"
+      });
+      continue;
+    }
+
     if (event.type !== "message") continue;
 
     const text = event.message.text.trim();
-    const userId = await getUserId(event);
+    const userId = event.source.userId;
 
-    // menu
+    // ===== menu =====
     if (text === "menu") {
       await client.replyMessage(event.replyToken, menu());
       continue;
     }
 
-    // 管理者制限
+    // ===== 管理者制限 =====
     if (!(await isAdmin(userId))) continue;
 
-    // ping
+    // ===== ping =====
     if (text === "ping") {
       await client.replyMessage(event.replyToken,{type:"text",text:"OK"});
+      continue;
+    }
+
+    // ===== 状態確認 =====
+    if (text === "状態確認") {
+      const resSheet = await sheets.spreadsheets.values.get({
+        spreadsheetId,
+        range: "settings!A1"
+      });
+
+      const limit = resSheet.data.values?.[0]?.[0] || "未設定";
+
+      await client.replyMessage(event.replyToken,{
+        type:"text",
+        text:`現在の連投制限：${limit}`
+      });
+      continue;
+    }
+
+    // ===== 挨拶ON/OFF =====
+    if (text === "挨拶ON") {
+      await sheets.spreadsheets.values.update({
+        spreadsheetId,
+        range:"settings!B1",
+        valueInputOption:"RAW",
+        resource:{ values:[["ON"]] }
+      });
+      await client.replyMessage(event.replyToken,{type:"text",text:"挨拶ON"});
+      continue;
+    }
+
+    if (text === "挨拶OFF") {
+      await sheets.spreadsheets.values.update({
+        spreadsheetId,
+        range:"settings!B1",
+        valueInputOption:"RAW",
+        resource:{ values:[["OFF"]] }
+      });
+      await client.replyMessage(event.replyToken,{type:"text",text:"挨拶OFF"});
+      continue;
+    }
+
+    if (text === "挨拶確認") {
+      const resSheet = await sheets.spreadsheets.values.get({
+        spreadsheetId,
+        range:"settings!B1"
+      });
+
+      const status = resSheet.data.values?.[0]?.[0] || "OFF";
+
+      await client.replyMessage(event.replyToken,{
+        type:"text",
+        text:`挨拶状態：${status}`
+      });
+      continue;
     }
 
     // ===== 一覧 =====
@@ -231,15 +300,30 @@ app.post("/webhook", middleware(config), async (req, res) => {
     // ===== 連投制限 =====
     if (text.startsWith("連投制限")) {
       const num = text.replace("連投制限","").trim();
+
+      if (!num || isNaN(num)) {
+        await client.replyMessage(event.replyToken,{
+          type:"text",
+          text:"例：連投制限 5"
+        });
+        continue;
+      }
+
       await sheets.spreadsheets.values.update({
         spreadsheetId,
-        range: "settings!A1",
-        valueInputOption: "RAW",
-        resource: { values: [[num]] }
+        range:"settings!A1",
+        valueInputOption:"RAW",
+        resource:{ values:[[num]] }
       });
-      await client.replyMessage(event.replyToken,{type:"text",text:"設定OK"});
+
+      await client.replyMessage(event.replyToken,{
+        type:"text",
+        text:`連投制限 ${num}`
+      });
+      continue;
     }
   }
+
   res.sendStatus(200);
 });
 
