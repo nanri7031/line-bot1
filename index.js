@@ -11,11 +11,10 @@ const config = {
 };
 const client = new Client(config);
 
-// ⭐ これが超重要（今回の不具合の原因）
 const reply = (token, text) =>
   client.replyMessage(token, { type: "text", text });
 
-// ===== Google Sheets =====
+// ===== Google =====
 const auth = new google.auth.JWT(
   process.env.GOOGLE_CLIENT_EMAIL,
   null,
@@ -30,13 +29,6 @@ const spreadsheetId = process.env.SPREADSHEET_ID;
 const OWNER_ID = "U1a1aca9e44466f8cb05003d7dc86fee0";
 const ADMIN_PASS = "1234";
 
-// ===== メンション取得 =====
-function getMentionedUserId(event) {
-  const m = event.message.mention;
-  if (!m || !m.mentionees || m.mentionees.length === 0) return null;
-  return m.mentionees[0].userId;
-}
-
 // ===== 設定 =====
 async function getSettings(groupId) {
   const res = await sheets.spreadsheets.values.get({
@@ -48,8 +40,8 @@ async function getSettings(groupId) {
 }
 
 async function ensureSettings(groupId) {
-  let s = await getSettings(groupId);
-  if (!s) {
+  const exist = await getSettings(groupId);
+  if (!exist) {
     await sheets.spreadsheets.values.append({
       spreadsheetId,
       range: "settings!A:C",
@@ -59,7 +51,7 @@ async function ensureSettings(groupId) {
   }
 }
 
-// ===== 管理 =====
+// ===== 管理者 =====
 async function isAdmin(groupId, userId) {
   if (userId === OWNER_ID) return true;
 
@@ -91,29 +83,6 @@ async function addNG(groupId, word) {
   });
 }
 
-// ===== カウント =====
-async function getCount(groupId, userId) {
-  const res = await sheets.spreadsheets.values.get({
-    spreadsheetId,
-    range: "log!A:C"
-  });
-  const rows = res.data.values || [];
-  const r = rows.find(x => x[0] === groupId && x[1] === userId);
-  return r ? Number(r[2]) : 0;
-}
-
-async function addCount(groupId, userId, count) {
-  await sheets.spreadsheets.values.append({
-    spreadsheetId,
-    range: "log!A:C",
-    valueInputOption: "RAW",
-    requestBody: { values: [[groupId, userId, count]] }
-  });
-}
-
-// ===== 連投 =====
-const spamMap = {};
-
 // ===== Webhook =====
 app.post("/webhook", middleware(config), async (req, res) => {
 
@@ -132,11 +101,11 @@ app.post("/webhook", middleware(config), async (req, res) => {
 
     const text = event.message.text.trim();
 
-    // ===== メニュー =====
+    // ===== menu =====
     if (text === "menu") {
       return reply(event.replyToken,
         "管理メニュー\n" +
-        "管理登録 1234\n管理追加 @\n管理削除 @\n" +
+        "管理登録 1234\n" +
         "NG追加 ○○\nNG一覧\n" +
         "連投制限 数字\n状態確認\n" +
         "挨拶ON / OFF"
@@ -193,7 +162,7 @@ app.post("/webhook", middleware(config), async (req, res) => {
 
       const num = text.replace("連投制限","").trim();
 
-      await sheets.spreadsheets.values.update({
+      await sheets.spreadsheets.values.append({
         spreadsheetId,
         range: "settings!A:C",
         valueInputOption: "RAW",
@@ -212,7 +181,7 @@ app.post("/webhook", middleware(config), async (req, res) => {
 
     // ===== 挨拶 =====
     if (text === "挨拶ON") {
-      await sheets.spreadsheets.values.update({
+      await sheets.spreadsheets.values.append({
         spreadsheetId,
         range: "settings!A:C",
         valueInputOption: "RAW",
@@ -222,7 +191,7 @@ app.post("/webhook", middleware(config), async (req, res) => {
     }
 
     if (text === "挨拶OFF") {
-      await sheets.spreadsheets.values.update({
+      await sheets.spreadsheets.values.append({
         spreadsheetId,
         range: "settings!A:C",
         valueInputOption: "RAW",
