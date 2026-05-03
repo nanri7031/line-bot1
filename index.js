@@ -10,7 +10,7 @@ const config = {
 };
 const client = new Client(config);
 
-// ===== 修正版 send（最重要）=====
+// ===== 安定送信 =====
 const send = async (event, msg) => {
   try {
     await client.replyMessage(event.replyToken, msg);
@@ -43,9 +43,8 @@ const PASS = "1234";
 
 // ===== util =====
 const getMention = e => e.message.mention?.mentionees?.[0]?.userId;
-const getSheet = async r => (await sheets.spreadsheets.values.get({
-  spreadsheetId: sheetId, range: r
-})).data.values || [];
+const getSheet = async r =>
+  (await sheets.spreadsheets.values.get({ spreadsheetId: sheetId, range: r })).data.values || [];
 
 // ===== settings =====
 async function getSetting(g){
@@ -71,7 +70,6 @@ async function isSub(g,u){
   const r = await getSheet("subs!A:B");
   return r.some(x=>x[0]===g && x[1]===u);
 }
-const isManager = async (g,u)=> (await isAdmin(g,u)) || (await isSub(g,u));
 
 // ===== Webhook =====
 app.post("/webhook", middleware(config), async (req,res)=>{
@@ -96,62 +94,43 @@ if(e.type!=="message"||e.message.type!=="text") continue;
 
 const t = e.message.text.trim();
 
-// ===== menu =====
+// ===== menu（安定Flex）=====
 if(t==="menu"){
 await send(e,{
 type:"flex",
 altText:"管理メニュー",
 contents:{
 type:"bubble",
-size:"mega",
 body:{
 type:"box",
 layout:"vertical",
 spacing:"md",
 contents:[
 
-{type:"box",layout:"vertical",backgroundColor:"#0D47A1",paddingAll:"10px",
-contents:[{type:"text",text:"管理メニュー",color:"#fff",align:"center",weight:"bold"}]},
+{type:"text",text:"管理メニュー",weight:"bold",size:"lg",align:"center"},
 
-// 管理
-{type:"box",layout:"horizontal",contents:[
-{type:"button",style:"primary",color:"#1565C0",action:{type:"message",label:"管理登録",text:"管理登録 1234"}},
-{type:"button",style:"primary",color:"#1565C0",action:{type:"message",label:"管理一覧",text:"管理一覧"}}
-]},
-{type:"box",layout:"horizontal",contents:[
-{type:"button",style:"primary",color:"#1565C0",action:{type:"message",label:"管理追加",text:"管理追加 @"}},
-{type:"button",style:"primary",color:"#1565C0",action:{type:"message",label:"管理削除",text:"管理削除 @"}}
-]},
+{type:"button",style:"primary",action:{type:"message",label:"管理登録",text:"管理登録 1234"}},
+{type:"button",style:"primary",action:{type:"message",label:"管理一覧",text:"管理一覧"}},
 
-// 副管理
-{type:"box",layout:"horizontal",contents:[
-{type:"button",style:"primary",color:"#1565C0",action:{type:"message",label:"副管理追加",text:"副管理追加 @"}},
-{type:"button",style:"primary",color:"#1565C0",action:{type:"message",label:"副管理削除",text:"副管理削除 @"}}
-]},
-{type:"box",layout:"horizontal",contents:[
-{type:"button",style:"primary",color:"#1565C0",action:{type:"message",label:"副管理一覧",text:"副管理一覧"}},
-{type:"button",style:"primary",color:"#1565C0",action:{type:"message",label:"状態確認",text:"状態確認"}}
-]},
+{type:"button",style:"primary",action:{type:"message",label:"管理追加",text:"管理追加"}},
+{type:"button",style:"primary",action:{type:"message",label:"管理削除",text:"管理削除"}},
 
-// NG
-{type:"box",layout:"horizontal",contents:[
+{type:"button",style:"primary",action:{type:"message",label:"副管理追加",text:"副管理追加"}},
+{type:"button",style:"primary",action:{type:"message",label:"副管理削除",text:"副管理削除"}},
+{type:"button",style:"primary",action:{type:"message",label:"副管理一覧",text:"副管理一覧"}},
+
 {type:"button",style:"primary",color:"#D32F2F",action:{type:"message",label:"NG追加",text:"NG追加 test"}},
-{type:"button",style:"primary",color:"#1565C0",action:{type:"message",label:"NG一覧",text:"NG一覧"}}
-]},
-{type:"box",layout:"horizontal",contents:[
-{type:"button",style:"primary",color:"#1565C0",action:{type:"message",label:"NG削除",text:"NG削除 test"}},
-{type:"button",style:"primary",color:"#1565C0",action:{type:"message",label:"連投制限",text:"連投制限 5"}}
-]},
+{type:"button",style:"primary",action:{type:"message",label:"NG削除",text:"NG削除 test"}},
+{type:"button",style:"primary",action:{type:"message",label:"NG一覧",text:"NG一覧"}},
 
-// 挨拶（黒→白文字）
-{type:"box",layout:"horizontal",contents:[
+{type:"button",style:"primary",action:{type:"message",label:"連投制限",text:"連投制限 5"}},
+{type:"button",style:"primary",action:{type:"message",label:"状態確認",text:"状態確認"}},
+
 {type:"button",style:"primary",color:"#212121",action:{type:"message",label:"挨拶ON",text:"挨拶ON"}},
-{type:"button",style:"primary",color:"#424242",action:{type:"message",label:"挨拶OFF",text:"挨拶OFF"}}
-]},
-{type:"box",layout:"horizontal",contents:[
-{type:"button",style:"primary",color:"#1565C0",action:{type:"message",label:"挨拶登録",text:"挨拶登録 ようこそ！"}},
-{type:"button",style:"primary",color:"#1565C0",action:{type:"message",label:"挨拶確認",text:"挨拶確認"}}
-]}
+{type:"button",style:"primary",color:"#424242",action:{type:"message",label:"挨拶OFF",text:"挨拶OFF"}},
+
+{type:"button",style:"primary",action:{type:"message",label:"挨拶登録",text:"挨拶登録 ようこそ！"}},
+{type:"button",style:"primary",action:{type:"message",label:"挨拶確認",text:"挨拶確認"}}
 
 ]}}});
 continue;
@@ -166,23 +145,21 @@ range:"admins!A:C",
 valueInputOption:"RAW",
 requestBody:{values:[[g,u,"管理者"]]}
 });
-await send(e,{type:"text",text:"登録OK"});
-continue;
+return send(e,{type:"text",text:"登録OK"});
 }
 
 // ===== 管理追加 =====
 if(t.startsWith("管理追加")){
 if(!(await isAdmin(g,u))) return send(e,{type:"text",text:"管理者のみ"});
 const target=getMention(e);
-if(!target) return send(e,{type:"text",text:"メンションして"});
+if(!target) return send(e,{type:"text",text:"追加したい人をメンションして"});
 await sheets.spreadsheets.values.append({
 spreadsheetId:sheetId,
 range:"admins!A:C",
 valueInputOption:"RAW",
 requestBody:{values:[[g,target,"追加"]]}
 });
-await send(e,{type:"text",text:"管理追加OK"});
-continue;
+return send(e,{type:"text",text:"管理追加OK"});
 }
 
 // ===== 管理削除 =====
@@ -199,19 +176,16 @@ range:"admins!A:B",
 valueInputOption:"RAW",
 requestBody:{values:filtered}
 });
-await send(e,{type:"text",text:"削除OK"});
-continue;
+return send(e,{type:"text",text:"削除OK"});
 }
 
 // ===== 管理一覧 =====
 if(t==="管理一覧"){
 const r=await getSheet("admins!A:B");
-const list=r.filter(x=>x[0]===g).map(x=>x[1]);
-await send(e,{type:"text",text:list.join("\n")||"なし"});
-continue;
+return send(e,{type:"text",text:r.filter(x=>x[0]===g).map(x=>x[1]).join("\n")||"なし"});
 }
 
-// ===== 副管理追加 =====
+// ===== 副管理 =====
 if(t.startsWith("副管理追加")){
 if(!(await isAdmin(g,u))) return send(e,{type:"text",text:"管理者のみ"});
 const target=getMention(e);
@@ -221,11 +195,9 @@ range:"subs!A:B",
 valueInputOption:"RAW",
 requestBody:{values:[[g,target]]}
 });
-await send(e,{type:"text",text:"副管理追加OK"});
-continue;
+return send(e,{type:"text",text:"副管理追加OK"});
 }
 
-// ===== 副管理削除 =====
 if(t.startsWith("副管理削除")){
 const target=getMention(e);
 const rows=await getSheet("subs!A:B");
@@ -237,16 +209,12 @@ range:"subs!A:B",
 valueInputOption:"RAW",
 requestBody:{values:filtered}
 });
-await send(e,{type:"text",text:"削除OK"});
-continue;
+return send(e,{type:"text",text:"削除OK"});
 }
 
-// ===== 副管理一覧 =====
 if(t==="副管理一覧"){
 const r=await getSheet("subs!A:B");
-const list=r.filter(x=>x[0]===g).map(x=>x[1]);
-await send(e,{type:"text",text:list.join("\n")||"なし"});
-continue;
+return send(e,{type:"text",text:r.filter(x=>x[0]===g).map(x=>x[1]).join("\n")||"なし"});
 }
 
 // ===== NG =====
@@ -259,8 +227,7 @@ range:"ng!A:B",
 valueInputOption:"RAW",
 requestBody:{values:[[g,w]]}
 });
-await send(e,{type:"text",text:"追加OK"});
-continue;
+return send(e,{type:"text",text:"追加OK"});
 }
 
 if(t.startsWith("NG削除")){
@@ -274,43 +241,37 @@ range:"ng!A:B",
 valueInputOption:"RAW",
 requestBody:{values:filtered}
 });
-await send(e,{type:"text",text:"削除OK"});
-continue;
+return send(e,{type:"text",text:"削除OK"});
 }
 
 if(t==="NG一覧"){
 const r=await getSheet("ng!A:B");
-const list=r.filter(x=>x[0]===g).map(x=>x[1]);
-await send(e,{type:"text",text:list.join("\n")||"なし"});
-continue;
+return send(e,{type:"text",text:r.filter(x=>x[0]===g).map(x=>x[1]).join("\n")||"なし"});
 }
 
-// ===== 連投 =====
+// ===== 設定 =====
 if(t.startsWith("連投制限")){
 const num=t.replace("連投制限","").trim();
 await setSetting(g,num,set[2],set[3]);
-await send(e,{type:"text",text:"設定OK"});
-continue;
+return send(e,{type:"text",text:"設定OK"});
 }
 
-// ===== 状態 =====
 if(t==="状態確認"){
-await send(e,{type:"text",text:`制限:${set[1]}\n挨拶:${set[2]}`});
-continue;
+return send(e,{type:"text",text:`制限:${set[1]}\n挨拶:${set[2]}`});
 }
 
 // ===== 挨拶 =====
-if(t==="挨拶ON"){await setSetting(g,set[1],"ON",set[3]);await send(e,{type:"text",text:"ON"});continue;}
-if(t==="挨拶OFF"){await setSetting(g,set[1],"OFF",set[3]);await send(e,{type:"text",text:"OFF"});continue;}
+if(t==="挨拶ON"){await setSetting(g,set[1],"ON",set[3]);return send(e,{type:"text",text:"ON"});}
+if(t==="挨拶OFF"){await setSetting(g,set[1],"OFF",set[3]);return send(e,{type:"text",text:"OFF"});}
+
 if(t.startsWith("挨拶登録")){
 const txt=t.replace("挨拶登録","").trim();
 await setSetting(g,set[1],set[2],txt);
-await send(e,{type:"text",text:"登録OK"});
-continue;
+return send(e,{type:"text",text:"登録OK"});
 }
+
 if(t==="挨拶確認"){
-await send(e,{type:"text",text:`状態:${set[2]}\n内容:${set[3]}`});
-continue;
+return send(e,{type:"text",text:`状態:${set[2]}\n内容:${set[3]}`});
 }
 
 }
