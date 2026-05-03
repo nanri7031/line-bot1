@@ -7,7 +7,7 @@ const app = express();
 // ===== LINE =====
 const config = {
   channelAccessToken: process.env.CHANNEL_ACCESS_TOKEN,
-  channelSecret: process.env.CHANNEL_SECRET,
+  channelSecret: process.env.CHANNEL_SECRET
 };
 const client = new Client(config);
 
@@ -22,306 +22,286 @@ const auth = new google.auth.JWT(
 const sheets = google.sheets({ version: "v4", auth });
 const spreadsheetId = process.env.SPREADSHEET_ID;
 
-// ===== 管理者 =====
-const OWNER = "U1a1aca9e44466f8cb05003d7dc86fee0";
+// ===== 固定設定 =====
+const OWNER_ID = "U1a1aca9e44466f8cb05003d7dc86fee0";
+const ADMIN_PASS = "1234";
 
-// ===== 管理者判定 =====
-async function isAdmin(userId) {
-  if (userId === OWNER) return true;
+// ===== ヘルパー =====
+const reply = (token, text) =>
+  client.replyMessage(token, { type: "text", text });
 
+// ===== メンション取得 =====
+function getMentionedUserId(event) {
+  const m = event.message.mention;
+  if (!m || !m.mentionees || m.mentionees.length === 0) return null;
+  return m.mentionees[0].userId;
+}
+
+// ===== 設定 =====
+async function getSettings(groupId) {
   const res = await sheets.spreadsheets.values.get({
     spreadsheetId,
-    range: "admins!A:A",
+    range: "settings!A:C"
   });
-
   const rows = res.data.values || [];
-  return rows.some(r => r[0] === userId);
+  return rows.find(r => r[0] === groupId);
 }
 
-// ===== 共通 =====
-async function get(sheet) {
-  const res = await sheets.spreadsheets.values.get({
-    spreadsheetId,
-    range: `${sheet}!A:B`,
-  });
-  return res.data.values || [];
-}
-
-async function add(sheet, row) {
-  await sheets.spreadsheets.values.append({
-    spreadsheetId,
-    range: `${sheet}!A:B`,
-    valueInputOption: "RAW",
-    resource: { values: [row] },
-  });
-}
-
-async function remove(sheet, value) {
-  const rows = await get(sheet);
-  const filtered = rows.filter(r => r[0] !== value);
-
-  await sheets.spreadsheets.values.clear({
-    spreadsheetId,
-    range: `${sheet}!A:B`,
-  });
-
-  if (filtered.length) {
-    await sheets.spreadsheets.values.update({
+async function ensureSettings(groupId) {
+  let s = await getSettings(groupId);
+  if (!s) {
+    await sheets.spreadsheets.values.append({
       spreadsheetId,
-      range: `${sheet}!A:B`,
+      range: "settings!A:C",
       valueInputOption: "RAW",
-      resource: { values: filtered },
+      requestBody: { values: [[groupId, "5", "ON"]] }
     });
   }
 }
 
-// ===== メニュー =====
-function menu() {
-  const rows = [
-    ["管理一覧","副管理一覧","blue"],
-    ["BAN一覧","NG一覧","blue"],
-    ["管理追加","管理削除","light"],
-    ["副管理追加","副管理削除","light"],
-    ["NG追加","通報","danger"],
-    ["解除","状態確認","dark"],
-    ["連投制限","挨拶ON","light"],
-    ["挨拶OFF","挨拶確認","light"]
-  ];
+// ===== 管理者判定 =====
+async function isAdmin(groupId, userId) {
+  if (userId === OWNER_ID) return true;
 
-  return {
-    type: "flex",
-    altText: "管理メニュー",
-    contents: {
-      type: "bubble",
-      body: {
-        type: "box",
-        layout: "vertical",
-        contents: [
-          { type:"text", text:"管理メニュー", weight:"bold", size:"lg", align:"center" },
-          ...rows.map(r=>({
-            type:"box",
-            layout:"horizontal",
-            contents:[
-              btn(r[0], r[2]),
-              btn(r[1], r[2])
-            ]
-          }))
-        ]
-      }
-    }
-  };
+  const res = await sheets.spreadsheets.values.get({
+    spreadsheetId,
+    range: "admins!A:B"
+  });
+
+  const rows = res.data.values || [];
+  return rows.some(r => r[0] === groupId && r[1] === userId);
 }
 
-function btn(label,type){
-  let color="#3B82F6";
-  if(type==="blue") color="#2563EB";
-  if(type==="light") color="#60A5FA";
-  if(type==="danger") color="#EF4444";
-  if(type==="dark") color="#374151";
-
-  return {
-    type:"button",
-    style:"primary",
-    color,
-    flex:1,
-    action:{ type:"message", label, text:label }
-  };
+// ===== NG =====
+async function getNG(groupId) {
+  const res = await sheets.spreadsheets.values.get({
+    spreadsheetId,
+    range: "ng!A:B"
+  });
+  const rows = res.data.values || [];
+  return rows.filter(r => r[0] === groupId);
 }
 
-// ===== 一覧表示 =====
-function listFlex(title, list, cmd) {
-  return {
-    type: "flex",
-    altText: title,
-    contents: {
-      type: "bubble",
-      body: {
-        type: "box",
-        layout: "vertical",
-        contents: [
-          { type: "text", text: title, weight: "bold" },
-          ...list.map(r => ({
-            type: "box",
-            layout: "horizontal",
-            contents: [
-              { type: "text", text: r[1] || r[0], flex: 3 },
-              {
-                type: "button",
-                style: "secondary",
-                action: {
-                  type: "message",
-                  label: "削除",
-                  text: `${cmd} ${r[0]}`
-                }
-              }
-            ]
-          }))
-        ]
-      }
-    }
-  };
+async function addNG(groupId, word) {
+  await sheets.spreadsheets.values.append({
+    spreadsheetId,
+    range: "ng!A:B",
+    valueInputOption: "RAW",
+    requestBody: { values: [[groupId, word]] }
+  });
 }
+
+// ===== NGカウント =====
+async function getCount(groupId, userId) {
+  const res = await sheets.spreadsheets.values.get({
+    spreadsheetId,
+    range: "log!A:C"
+  });
+  const rows = res.data.values || [];
+  const r = rows.find(x => x[0] === groupId && x[1] === userId);
+  return r ? Number(r[2]) : 0;
+}
+
+async function addCount(groupId, userId, count) {
+  await sheets.spreadsheets.values.append({
+    spreadsheetId,
+    range: "log!A:C",
+    valueInputOption: "RAW",
+    requestBody: { values: [[groupId, userId, count]] }
+  });
+}
+
+// ===== 連投制限 =====
+const spamMap = {};
 
 // ===== Webhook =====
 app.post("/webhook", middleware(config), async (req, res) => {
 
   for (const event of req.body.events) {
 
+    if (!event.source.groupId) continue;
+
+    const groupId = event.source.groupId;
+    const userId = event.source.userId;
+
+    await ensureSettings(groupId);
+    const setting = await getSettings(groupId);
+
     // ===== 入室挨拶 =====
     if (event.type === "memberJoined") {
-      const resSheet = await sheets.spreadsheets.values.get({
-        spreadsheetId,
-        range: "settings!B1"
-      });
-
-      const greet = resSheet.data.values?.[0]?.[0];
-      if (greet !== "ON") continue;
-
-      await client.replyMessage(event.replyToken,{
-        type:"text",
-        text:"ようこそ！参加ありがとうございます😊"
-      });
+      if (setting?.[2] === "ON") {
+        await client.pushMessage(groupId, {
+          type: "text",
+          text: "ようこそ！"
+        });
+      }
       continue;
     }
 
     if (event.type !== "message") continue;
+    if (event.message.type !== "text") continue;
 
     const text = event.message.text.trim();
-    const userId = event.source.userId;
 
-    // ===== menu =====
-    if (text === "menu") {
-      await client.replyMessage(event.replyToken, menu());
+    // ===== 連投制限 =====
+    const now = Date.now();
+    if (!spamMap[userId]) spamMap[userId] = [];
+    spamMap[userId] = spamMap[userId].filter(t => now - t < 5000);
+    spamMap[userId].push(now);
+
+    if (spamMap[userId].length > Number(setting?.[1] || 5)) {
+      await reply(event.replyToken, "⚠️連投制限");
       continue;
     }
 
-    // ===== 管理者制限 =====
-    if (!(await isAdmin(userId))) continue;
+    // ===== NG検知 =====
+    const ngList = await getNG(groupId);
+    const hit = ngList.find(r => text.includes(r[1]));
 
-    // ===== ping =====
-    if (text === "ping") {
-      await client.replyMessage(event.replyToken,{type:"text",text:"OK"});
+    if (hit) {
+      let c = await getCount(groupId, userId);
+      c++;
+
+      await addCount(groupId, userId, c);
+
+      await reply(event.replyToken, `⚠️NGワード ${c}回目`);
+
+      if (c >= 3) {
+        await client.kickMember(groupId, userId);
+      }
       continue;
+    }
+
+    // ===== メニュー =====
+    if (text === "menu") {
+      return reply(event.replyToken,
+        "管理メニュー\n" +
+        "管理登録 1234\n管理追加 @\n管理削除 @\n" +
+        "NG追加 ○○\nNG一覧\n" +
+        "連投制限 数字\n状態確認\n" +
+        "挨拶ON / OFF / 確認"
+      );
+    }
+
+    // ===== 初回管理登録 =====
+    if (text.startsWith("管理登録")) {
+
+      const pass = text.replace("管理登録","").trim();
+
+      const res = await sheets.spreadsheets.values.get({
+        spreadsheetId,
+        range: "admins!A:B"
+      });
+
+      const exist = (res.data.values || []).some(r => r[0] === groupId);
+
+      if (exist) return reply(event.replyToken,"既に管理者あり");
+      if (pass !== ADMIN_PASS) return reply(event.replyToken,"パス違い");
+
+      await sheets.spreadsheets.values.append({
+        spreadsheetId,
+        range: "admins!A:C",
+        valueInputOption: "RAW",
+        requestBody: { values: [[groupId, userId, "初期管理者"]] }
+      });
+
+      return reply(event.replyToken,"管理者登録OK");
+    }
+
+    // ===== 管理追加 =====
+    if (text.startsWith("管理追加")) {
+
+      if (!(await isAdmin(groupId, userId))) {
+        return reply(event.replyToken,"権限なし");
+      }
+
+      const target = getMentionedUserId(event);
+      if (!target) return reply(event.replyToken,"メンションして");
+
+      await sheets.spreadsheets.values.append({
+        spreadsheetId,
+        range: "admins!A:C",
+        valueInputOption: "RAW",
+        requestBody: { values: [[groupId, target, ""]] }
+      });
+
+      return reply(event.replyToken,"追加OK");
+    }
+
+    // ===== 管理削除 =====
+    if (text.startsWith("管理削除")) {
+
+      if (!(await isAdmin(groupId, userId))) {
+        return reply(event.replyToken,"権限なし");
+      }
+
+      const target = getMentionedUserId(event);
+      if (!target) return reply(event.replyToken,"メンションして");
+
+      if (target === OWNER_ID) {
+        return reply(event.replyToken,"オーナー削除不可");
+      }
+
+      return reply(event.replyToken,"削除処理はシート側で");
+    }
+
+    // ===== NG追加 =====
+    if (text.startsWith("NG追加")) {
+      const word = text.replace("NG追加","").trim();
+      if (!word) return reply(event.replyToken,"入力して");
+
+      await addNG(groupId, word);
+      return reply(event.replyToken,"NG追加OK");
+    }
+
+    // ===== NG一覧 =====
+    if (text === "NG一覧") {
+      const list = (await getNG(groupId)).map(r => r[1]);
+      return reply(event.replyToken, list.join("\n") || "なし");
+    }
+
+    // ===== 連投制限設定 =====
+    if (text.startsWith("連投制限")) {
+      const num = text.replace("連投制限","").trim();
+
+      await sheets.spreadsheets.values.update({
+        spreadsheetId,
+        range: "settings!A:C",
+        valueInputOption: "RAW",
+        requestBody: { values: [[groupId, num, setting?.[2]]] }
+      });
+
+      return reply(event.replyToken, "設定OK");
     }
 
     // ===== 状態確認 =====
     if (text === "状態確認") {
-      const resSheet = await sheets.spreadsheets.values.get({
-        spreadsheetId,
-        range: "settings!A1"
-      });
-
-      const limit = resSheet.data.values?.[0]?.[0] || "未設定";
-
-      await client.replyMessage(event.replyToken,{
-        type:"text",
-        text:`現在の連投制限：${limit}`
-      });
-      continue;
+      return reply(event.replyToken,
+        `制限:${setting?.[1]}\n挨拶:${setting?.[2]}`
+      );
     }
 
-    // ===== 挨拶ON/OFF =====
+    // ===== 挨拶 =====
     if (text === "挨拶ON") {
       await sheets.spreadsheets.values.update({
         spreadsheetId,
-        range:"settings!B1",
-        valueInputOption:"RAW",
-        resource:{ values:[["ON"]] }
+        range: "settings!A:C",
+        valueInputOption: "RAW",
+        requestBody: { values: [[groupId, setting?.[1], "ON"]] }
       });
-      await client.replyMessage(event.replyToken,{type:"text",text:"挨拶ON"});
-      continue;
+      return reply(event.replyToken,"ON");
     }
 
     if (text === "挨拶OFF") {
       await sheets.spreadsheets.values.update({
         spreadsheetId,
-        range:"settings!B1",
-        valueInputOption:"RAW",
-        resource:{ values:[["OFF"]] }
+        range: "settings!A:C",
+        valueInputOption: "RAW",
+        requestBody: { values: [[groupId, setting?.[1], "OFF"]] }
       });
-      await client.replyMessage(event.replyToken,{type:"text",text:"挨拶OFF"});
-      continue;
+      return reply(event.replyToken,"OFF");
     }
 
-    if (text === "挨拶確認") {
-      const resSheet = await sheets.spreadsheets.values.get({
-        spreadsheetId,
-        range:"settings!B1"
-      });
-
-      const status = resSheet.data.values?.[0]?.[0] || "OFF";
-
-      await client.replyMessage(event.replyToken,{
-        type:"text",
-        text:`挨拶状態：${status}`
-      });
-      continue;
-    }
-
-    // ===== 一覧 =====
-    if (text === "管理一覧")
-      await client.replyMessage(event.replyToken, listFlex("管理一覧", await get("admins"), "管理削除"));
-
-    if (text === "副管理一覧")
-      await client.replyMessage(event.replyToken, listFlex("副管理一覧", await get("subs"), "副管理削除"));
-
-    if (text === "NG一覧")
-      await client.replyMessage(event.replyToken, listFlex("NG一覧", await get("ng"), "NG削除"));
-
-    if (text === "BAN一覧")
-      await client.replyMessage(event.replyToken, listFlex("BAN一覧", await get("ban"), "解除"));
-
-    // ===== 追加 =====
-    if (text.startsWith("NG追加")) {
-      const w = text.replace("NG追加","").trim();
-      await add("ng",[w]);
-      await client.replyMessage(event.replyToken,{type:"text",text:"NG追加OK"});
-    }
-
-    if (text.startsWith("副管理追加")) {
-      const name = text.replace("副管理追加","").trim();
-      await add("subs",[Date.now(),name]);
-      await client.replyMessage(event.replyToken,{type:"text",text:"副管理追加OK"});
-    }
-
-    // ===== 削除 =====
-    if (text.startsWith("NG削除")) {
-      const w = text.replace("NG削除","").trim();
-      await remove("ng", w);
-      await client.replyMessage(event.replyToken,{type:"text",text:"削除OK"});
-    }
-
-    if (text.startsWith("副管理削除")) {
-      const id = text.replace("副管理削除","").trim();
-      await remove("subs", id);
-      await client.replyMessage(event.replyToken,{type:"text",text:"削除OK"});
-    }
-
-    // ===== 連投制限 =====
-    if (text.startsWith("連投制限")) {
-      const num = text.replace("連投制限","").trim();
-
-      if (!num || isNaN(num)) {
-        await client.replyMessage(event.replyToken,{
-          type:"text",
-          text:"例：連投制限 5"
-        });
-        continue;
-      }
-
-      await sheets.spreadsheets.values.update({
-        spreadsheetId,
-        range:"settings!A1",
-        valueInputOption:"RAW",
-        resource:{ values:[[num]] }
-      });
-
-      await client.replyMessage(event.replyToken,{
-        type:"text",
-        text:`連投制限 ${num}`
-      });
-      continue;
-    }
   }
 
   res.sendStatus(200);
