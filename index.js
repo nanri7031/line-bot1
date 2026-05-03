@@ -28,6 +28,7 @@ const auth = new google.auth.JWT(
   process.env.GOOGLE_PRIVATE_KEY.replace(/\\n/g, "\n"),
   ["https://www.googleapis.com/auth/spreadsheets"]
 );
+
 const sheets = google.sheets({ version: "v4", auth });
 const sheetId = process.env.SPREADSHEET_ID;
 
@@ -40,9 +41,14 @@ const getMention = e => e.message.mention?.mentionees?.[0]?.userId;
 
 const getSheet = async (range) => {
   try {
-    const res = await sheets.spreadsheets.values.get({ spreadsheetId: sheetId, range });
+    const res = await sheets.spreadsheets.values.get({
+      spreadsheetId: sheetId,
+      range
+    });
     return res.data.values || [];
-  } catch { return []; }
+  } catch {
+    return [];
+  }
 };
 
 // ===== 管理判定 =====
@@ -64,18 +70,39 @@ if(!e.source.groupId) continue;
 const g = e.source.groupId;
 const u = e.source.userId;
 
-// ===== BANチェック =====
+// ===== BANチェック（管理者は無効）=====
+const isAdminUser = await isAdmin(g,u);
 const banList = await getSheet("ban!A:B");
-if(banList.some(x=>x[0]===g && x[1]===u)){
+
+if(banList.some(x=>x[0]===g && x[1]===u) && !isAdminUser){
   await send(e,{type:"text",text:"🚫 利用制限中"});
   continue;
 }
 
 // ===== postback =====
 if(e.type==="postback"){
+
 const d = e.postback.data;
 
+// ===== 確認→実行 =====
+
 // 管理削除
+if(d.startsWith("confirm_admin_delete:")){
+const id = d.split(":")[1];
+return send(e,{
+type:"template",
+altText:"確認",
+template:{
+type:"confirm",
+text:"この管理者を削除しますか？",
+actions:[
+{type:"postback",label:"はい",data:`admin_delete:${id}`},
+{type:"message",label:"いいえ",text:"キャンセル"}
+]
+}
+});
+}
+
 if(d.startsWith("admin_delete:")){
 const id = d.split(":")[1];
 const rows = await getSheet("admins!A:B");
@@ -86,21 +113,41 @@ range:"admins!A:B",
 valueInputOption:"RAW",
 requestBody:{values:filtered}
 });
-return send(e,{type:"text",text:"管理削除OK"});
+return send(e,{type:"text",text:"削除完了"});
 }
 
-// 副管理削除
-if(d.startsWith("sub_delete:")){
+// BAN確認
+if(d.startsWith("confirm_ban:")){
 const id = d.split(":")[1];
-const rows = await getSheet("subs!A:B");
-const filtered = rows.filter(x=>!(x[0]===g && x[1]===id));
-await sheets.spreadsheets.values.update({
-spreadsheetId:sheetId,
-range:"subs!A:B",
-valueInputOption:"RAW",
-requestBody:{values:filtered}
+
+if(id===OWNER){
+return send(e,{type:"text",text:"オーナーはBAN不可"});
+}
+
+return send(e,{
+type:"template",
+altText:"確認",
+template:{
+type:"confirm",
+text:"このユーザーをBANしますか？",
+actions:[
+{type:"postback",label:"はい",data:`ban_add:${id}`},
+{type:"message",label:"いいえ",text:"キャンセル"}
+]
+}
 });
-return send(e,{type:"text",text:"副管理削除OK"});
+}
+
+// BAN追加
+if(d.startsWith("ban_add:")){
+const id = d.split(":")[1];
+await sheets.spreadsheets.values.append({
+spreadsheetId:sheetId,
+range:"ban!A:B",
+valueInputOption:"RAW",
+requestBody:{values:[[g,id]]}
+});
+return send(e,{type:"text",text:"BAN完了"});
 }
 
 // BAN解除
@@ -114,7 +161,7 @@ range:"ban!A:B",
 valueInputOption:"RAW",
 requestBody:{values:filtered}
 });
-return send(e,{type:"text",text:"BAN解除OK"});
+return send(e,{type:"text",text:"BAN解除"});
 }
 
 // NG削除
@@ -128,19 +175,7 @@ range:"ng!A:B",
 valueInputOption:"RAW",
 requestBody:{values:filtered}
 });
-return send(e,{type:"text",text:"NG削除OK"});
-}
-
-// ワンタップBAN
-if(d.startsWith("ban_add:")){
-const id = d.split(":")[1];
-await sheets.spreadsheets.values.append({
-spreadsheetId:sheetId,
-range:"ban!A:B",
-valueInputOption:"RAW",
-requestBody:{values:[[g,id]]}
-});
-return send(e,{type:"text",text:"BAN完了"});
+return send(e,{type:"text",text:"NG削除"});
 }
 
 }
@@ -165,23 +200,16 @@ contents:[
 {type:"text",text:"管理メニュー",weight:"bold",size:"lg"},
 
 ...[
-["管理登録 1234","管理一覧"],
-["管理追加","管理削除"],
-["副管理追加","副管理削除"],
-["副管理一覧","状態確認"],
-["NG追加 test","NG一覧"],
-["NG削除 test","連投制限 5"],
-["BAN追加","BAN解除"],
-["BAN一覧","状態確認"],
-["挨拶ON","挨拶OFF"],
-["挨拶登録 ようこそ！","挨拶確認"]
+["管理一覧","NG一覧"],
+["BAN一覧","状態確認"]
 ].map(row=>({
 type:"box",
 layout:"horizontal",
 contents:row.map(txt=>({
 type:"button",
 style:"primary",
-action:{type:"message",label:txt.split(" ")[0],text:txt}
+color:"#1565C0",
+action:{type:"message",label:txt,text:txt}
 }))
 }))
 ]
@@ -191,14 +219,60 @@ action:{type:"message",label:txt.split(" ")[0],text:txt}
 continue;
 }
 
-// ===== NG一覧（削除ボタン付き）=====
+// ===== 管理一覧（削除＋BAN）=====
+if(t.includes("管理一覧")){
+const rows = await getSheet("admins!A:B");
+const list = rows.filter(x=>x[0]===g);
+
+const contents = [];
+
+for(const r of list){
+
+let name = r[1];
+try{
+const p = await client.getGroupMemberProfile(g,r[1]);
+name = p.displayName;
+}catch{}
+
+contents.push({
+type:"box",
+layout:"horizontal",
+justifyContent:"space-between",
+contents:[
+{type:"text",text:name,flex:3},
+{
+type:"button",
+style:"primary",
+color:"#D32F2F",
+action:{type:"postback",label:"削除",data:`confirm_admin_delete:${r[1]}`}
+},
+{
+type:"button",
+style:"primary",
+color:"#000000",
+action:{type:"postback",label:"BAN",data:`confirm_ban:${r[1]}`}
+}
+]
+});
+}
+
+return send(e,{
+type:"flex",
+altText:"管理一覧",
+contents:{
+type:"bubble",
+body:{type:"box",layout:"vertical",contents:[
+{type:"text",text:"管理一覧",weight:"bold"},
+...contents
+]}
+}
+});
+}
+
+// ===== NG一覧（削除）=====
 if(t.includes("NG一覧")){
 const rows = await getSheet("ng!A:B");
 const list = rows.filter(x=>x[0]===g);
-
-if(list.length===0){
-return send(e,{type:"text",text:"なし"});
-}
 
 const contents = list.map(r=>({
 type:"box",
@@ -228,9 +302,9 @@ body:{type:"box",layout:"vertical",contents:[
 });
 }
 
-// ===== 管理一覧（BANボタン付き）=====
-if(t.includes("管理一覧")){
-const rows = await getSheet("admins!A:B");
+// ===== BAN一覧（解除）=====
+if(t.includes("BAN一覧")){
+const rows = await getSheet("ban!A:B");
 const list = rows.filter(x=>x[0]===g);
 
 const contents = [];
@@ -251,8 +325,8 @@ contents:[
 {
 type:"button",
 style:"primary",
-color:"#D32F2F",
-action:{type:"postback",label:"BAN",data:`ban_add:${r[1]}`}
+color:"#2E7D32",
+action:{type:"postback",label:"解除",data:`ban_remove:${r[1]}`}
 }
 ]
 });
@@ -260,11 +334,11 @@ action:{type:"postback",label:"BAN",data:`ban_add:${r[1]}`}
 
 return send(e,{
 type:"flex",
-altText:"管理一覧",
+altText:"BAN一覧",
 contents:{
 type:"bubble",
 body:{type:"box",layout:"vertical",contents:[
-{type:"text",text:"管理一覧",weight:"bold"},
+{type:"text",text:"BAN一覧",weight:"bold"},
 ...contents
 ]}
 }
@@ -274,7 +348,7 @@ body:{type:"box",layout:"vertical",contents:[
 }
 
 }catch(err){
-console.log(err);
+console.log("致命エラー:",err);
 }
 
 res.sendStatus(200);
