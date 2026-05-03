@@ -15,14 +15,10 @@ const send = async (event, msg) => {
   try {
     await client.replyMessage(event.replyToken, msg);
   } catch {
-    try {
-      if (event.source.groupId) {
-        await client.pushMessage(event.source.groupId, msg);
-      } else {
-        await client.pushMessage(event.source.userId, msg);
-      }
-    } catch (e) {
-      console.log("push失敗", e);
+    if (event.source.groupId) {
+      await client.pushMessage(event.source.groupId, msg);
+    } else {
+      await client.pushMessage(event.source.userId, msg);
     }
   }
 };
@@ -43,8 +39,10 @@ const PASS = "1234";
 
 // ===== util =====
 const getMention = e => e.message.mention?.mentionees?.[0]?.userId;
-const getSheet = async r =>
-  (await sheets.spreadsheets.values.get({ spreadsheetId: sheetId, range: r })).data.values || [];
+const getSheet = async r => (await sheets.spreadsheets.values.get({
+  spreadsheetId: sheetId,
+  range: r
+})).data.values || [];
 
 // ===== settings =====
 async function getSetting(g){
@@ -64,10 +62,6 @@ async function setSetting(g,l,gr,t){
 async function isAdmin(g,u){
   if(u===OWNER) return true;
   const r = await getSheet("admins!A:B");
-  return r.some(x=>x[0]===g && x[1]===u);
-}
-async function isSub(g,u){
-  const r = await getSheet("subs!A:B");
   return r.some(x=>x[0]===g && x[1]===u);
 }
 
@@ -94,45 +88,75 @@ if(e.type!=="message"||e.message.type!=="text") continue;
 
 const t = e.message.text.trim();
 
-// ===== menu（安定Flex）=====
+// ===== menu =====
 if(t==="menu"){
 await send(e,{
 type:"flex",
 altText:"管理メニュー",
 contents:{
 type:"bubble",
+size:"mega",
 body:{
 type:"box",
 layout:"vertical",
 spacing:"md",
 contents:[
 
-{type:"text",text:"管理メニュー",weight:"bold",size:"lg",align:"center"},
+// タイトル
+{
+type:"box",
+layout:"vertical",
+backgroundColor:"#0D47A1",
+paddingAll:"14px",
+contents:[
+{type:"text",text:"管理メニュー",color:"#fff",align:"center",weight:"bold",size:"lg"}
+]
+},
 
-{type:"button",style:"primary",action:{type:"message",label:"管理登録",text:"管理登録 1234"}},
-{type:"button",style:"primary",action:{type:"message",label:"管理一覧",text:"管理一覧"}},
+// 管理
+{type:"box",layout:"horizontal",contents:[
+{type:"button",style:"primary",color:"#1565C0",action:{type:"message",label:"管理登録",text:"管理登録 1234"}},
+{type:"button",style:"primary",color:"#1565C0",action:{type:"message",label:"管理一覧",text:"管理一覧"}}
+]},
+{type:"box",layout:"horizontal",contents:[
+{type:"button",style:"primary",color:"#1565C0",action:{type:"message",label:"管理追加",text:"管理追加"}},
+{type:"button",style:"primary",color:"#1565C0",action:{type:"message",label:"管理削除",text:"管理削除"}}
+]},
 
-{type:"button",style:"primary",action:{type:"message",label:"管理追加",text:"管理追加"}},
-{type:"button",style:"primary",action:{type:"message",label:"管理削除",text:"管理削除"}},
+// 副管理（緑）
+{type:"box",layout:"horizontal",contents:[
+{type:"button",style:"primary",color:"#2E7D32",action:{type:"message",label:"副管理追加",text:"副管理追加"}},
+{type:"button",style:"primary",color:"#2E7D32",action:{type:"message",label:"副管理削除",text:"副管理削除"}}
+]},
+{type:"box",layout:"horizontal",contents:[
+{type:"button",style:"primary",color:"#2E7D32",action:{type:"message",label:"副管理一覧",text:"副管理一覧"}},
+{type:"button",style:"primary",color:"#1565C0",action:{type:"message",label:"状態確認",text:"状態確認"}}
+]},
 
-{type:"button",style:"primary",action:{type:"message",label:"副管理追加",text:"副管理追加"}},
-{type:"button",style:"primary",action:{type:"message",label:"副管理削除",text:"副管理削除"}},
-{type:"button",style:"primary",action:{type:"message",label:"副管理一覧",text:"副管理一覧"}},
-
+// NG（赤）
+{type:"box",layout:"horizontal",contents:[
 {type:"button",style:"primary",color:"#D32F2F",action:{type:"message",label:"NG追加",text:"NG追加 test"}},
-{type:"button",style:"primary",action:{type:"message",label:"NG削除",text:"NG削除 test"}},
-{type:"button",style:"primary",action:{type:"message",label:"NG一覧",text:"NG一覧"}},
+{type:"button",style:"primary",color:"#D32F2F",action:{type:"message",label:"NG一覧",text:"NG一覧"}}
+]},
+{type:"box",layout:"horizontal",contents:[
+{type:"button",style:"primary",color:"#D32F2F",action:{type:"message",label:"NG削除",text:"NG削除 test"}},
+{type:"button",style:"primary",color:"#1565C0",action:{type:"message",label:"連投制限",text:"連投制限 5"}}
+]},
 
-{type:"button",style:"primary",action:{type:"message",label:"連投制限",text:"連投制限 5"}},
-{type:"button",style:"primary",action:{type:"message",label:"状態確認",text:"状態確認"}},
+// 挨拶（黒）
+{type:"box",layout:"horizontal",contents:[
+{type:"button",style:"primary",color:"#000000",action:{type:"message",label:"挨拶ON",text:"挨拶ON"}},
+{type:"button",style:"primary",color:"#333333",action:{type:"message",label:"挨拶OFF",text:"挨拶OFF"}}
+]},
+{type:"box",layout:"horizontal",contents:[
+{type:"button",style:"primary",color:"#1565C0",action:{type:"message",label:"挨拶登録",text:"挨拶登録 ようこそ！"}},
+{type:"button",style:"primary",color:"#1565C0",action:{type:"message",label:"挨拶確認",text:"挨拶確認"}}
+]}
 
-{type:"button",style:"primary",color:"#212121",action:{type:"message",label:"挨拶ON",text:"挨拶ON"}},
-{type:"button",style:"primary",color:"#424242",action:{type:"message",label:"挨拶OFF",text:"挨拶OFF"}},
-
-{type:"button",style:"primary",action:{type:"message",label:"挨拶登録",text:"挨拶登録 ようこそ！"}},
-{type:"button",style:"primary",action:{type:"message",label:"挨拶確認",text:"挨拶確認"}}
-
-]}}});
+]
+}
+}
+});
 continue;
 }
 
@@ -152,7 +176,7 @@ return send(e,{type:"text",text:"登録OK"});
 if(t.startsWith("管理追加")){
 if(!(await isAdmin(g,u))) return send(e,{type:"text",text:"管理者のみ"});
 const target=getMention(e);
-if(!target) return send(e,{type:"text",text:"追加したい人をメンションして"});
+if(!target) return send(e,{type:"text",text:"メンションして"});
 await sheets.spreadsheets.values.append({
 spreadsheetId:sheetId,
 range:"admins!A:C",
@@ -179,10 +203,32 @@ requestBody:{values:filtered}
 return send(e,{type:"text",text:"削除OK"});
 }
 
-// ===== 管理一覧 =====
+// ===== 管理一覧（名前）=====
 if(t==="管理一覧"){
-const r=await getSheet("admins!A:B");
-return send(e,{type:"text",text:r.filter(x=>x[0]===g).map(x=>x[1]).join("\n")||"なし"});
+const rows=await getSheet("admins!A:B");
+const list=rows.filter(x=>x[0]===g);
+
+const contents=[];
+for(const r of list){
+let name=r[1];
+try{
+const p=await client.getGroupMemberProfile(g,r[1]);
+name=p.displayName;
+}catch{}
+contents.push({type:"text",text:name,size:"sm"});
+}
+
+return send(e,{
+type:"flex",
+altText:"管理一覧",
+contents:{
+type:"bubble",
+body:{type:"box",layout:"vertical",contents:[
+{type:"text",text:"管理一覧",weight:"bold"},
+...contents
+]}
+}
+});
 }
 
 // ===== 副管理 =====
@@ -263,13 +309,11 @@ return send(e,{type:"text",text:`制限:${set[1]}\n挨拶:${set[2]}`});
 // ===== 挨拶 =====
 if(t==="挨拶ON"){await setSetting(g,set[1],"ON",set[3]);return send(e,{type:"text",text:"ON"});}
 if(t==="挨拶OFF"){await setSetting(g,set[1],"OFF",set[3]);return send(e,{type:"text",text:"OFF"});}
-
 if(t.startsWith("挨拶登録")){
 const txt=t.replace("挨拶登録","").trim();
 await setSetting(g,set[1],set[2],txt);
 return send(e,{type:"text",text:"登録OK"});
 }
-
 if(t==="挨拶確認"){
 return send(e,{type:"text",text:`状態:${set[2]}\n内容:${set[3]}`});
 }
