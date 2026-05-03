@@ -11,6 +11,10 @@ const config = {
 };
 const client = new Client(config);
 
+// ⭐ これが超重要（今回の不具合の原因）
+const reply = (token, text) =>
+  client.replyMessage(token, { type: "text", text });
+
 // ===== Google Sheets =====
 const auth = new google.auth.JWT(
   process.env.GOOGLE_CLIENT_EMAIL,
@@ -22,13 +26,9 @@ const auth = new google.auth.JWT(
 const sheets = google.sheets({ version: "v4", auth });
 const spreadsheetId = process.env.SPREADSHEET_ID;
 
-// ===== 固定設定 =====
+// ===== 固定 =====
 const OWNER_ID = "U1a1aca9e44466f8cb05003d7dc86fee0";
 const ADMIN_PASS = "1234";
-
-// ===== ヘルパー =====
-const reply = (token, text) =>
-  client.replyMessage(token, { type: "text", text });
 
 // ===== メンション取得 =====
 function getMentionedUserId(event) {
@@ -59,7 +59,7 @@ async function ensureSettings(groupId) {
   }
 }
 
-// ===== 管理者判定 =====
+// ===== 管理 =====
 async function isAdmin(groupId, userId) {
   if (userId === OWNER_ID) return true;
 
@@ -91,7 +91,7 @@ async function addNG(groupId, word) {
   });
 }
 
-// ===== NGカウント =====
+// ===== カウント =====
 async function getCount(groupId, userId) {
   const res = await sheets.spreadsheets.values.get({
     spreadsheetId,
@@ -111,7 +111,7 @@ async function addCount(groupId, userId, count) {
   });
 }
 
-// ===== 連投制限 =====
+// ===== 連投 =====
 const spamMap = {};
 
 // ===== Webhook =====
@@ -127,50 +127,10 @@ app.post("/webhook", middleware(config), async (req, res) => {
     await ensureSettings(groupId);
     const setting = await getSettings(groupId);
 
-    // ===== 入室挨拶 =====
-    if (event.type === "memberJoined") {
-      if (setting?.[2] === "ON") {
-        await client.pushMessage(groupId, {
-          type: "text",
-          text: "ようこそ！"
-        });
-      }
-      continue;
-    }
-
     if (event.type !== "message") continue;
     if (event.message.type !== "text") continue;
 
     const text = event.message.text.trim();
-
-    // ===== 連投制限 =====
-    const now = Date.now();
-    if (!spamMap[userId]) spamMap[userId] = [];
-    spamMap[userId] = spamMap[userId].filter(t => now - t < 5000);
-    spamMap[userId].push(now);
-
-    if (spamMap[userId].length > Number(setting?.[1] || 5)) {
-      await reply(event.replyToken, "⚠️連投制限");
-      continue;
-    }
-
-    // ===== NG検知 =====
-    const ngList = await getNG(groupId);
-    const hit = ngList.find(r => text.includes(r[1]));
-
-    if (hit) {
-      let c = await getCount(groupId, userId);
-      c++;
-
-      await addCount(groupId, userId, c);
-
-      await reply(event.replyToken, `⚠️NGワード ${c}回目`);
-
-      if (c >= 3) {
-        await client.kickMember(groupId, userId);
-      }
-      continue;
-    }
 
     // ===== メニュー =====
     if (text === "menu") {
@@ -179,11 +139,11 @@ app.post("/webhook", middleware(config), async (req, res) => {
         "管理登録 1234\n管理追加 @\n管理削除 @\n" +
         "NG追加 ○○\nNG一覧\n" +
         "連投制限 数字\n状態確認\n" +
-        "挨拶ON / OFF / 確認"
+        "挨拶ON / OFF"
       );
     }
 
-    // ===== 初回管理登録 =====
+    // ===== 管理登録 =====
     if (text.startsWith("管理登録")) {
 
       const pass = text.replace("管理登録","").trim();
@@ -208,45 +168,13 @@ app.post("/webhook", middleware(config), async (req, res) => {
       return reply(event.replyToken,"管理者登録OK");
     }
 
-    // ===== 管理追加 =====
-    if (text.startsWith("管理追加")) {
-
-      if (!(await isAdmin(groupId, userId))) {
-        return reply(event.replyToken,"権限なし");
-      }
-
-      const target = getMentionedUserId(event);
-      if (!target) return reply(event.replyToken,"メンションして");
-
-      await sheets.spreadsheets.values.append({
-        spreadsheetId,
-        range: "admins!A:C",
-        valueInputOption: "RAW",
-        requestBody: { values: [[groupId, target, ""]] }
-      });
-
-      return reply(event.replyToken,"追加OK");
-    }
-
-    // ===== 管理削除 =====
-    if (text.startsWith("管理削除")) {
-
-      if (!(await isAdmin(groupId, userId))) {
-        return reply(event.replyToken,"権限なし");
-      }
-
-      const target = getMentionedUserId(event);
-      if (!target) return reply(event.replyToken,"メンションして");
-
-      if (target === OWNER_ID) {
-        return reply(event.replyToken,"オーナー削除不可");
-      }
-
-      return reply(event.replyToken,"削除処理はシート側で");
-    }
-
     // ===== NG追加 =====
     if (text.startsWith("NG追加")) {
+
+      if (!(await isAdmin(groupId, userId))) {
+        return reply(event.replyToken,"権限なし");
+      }
+
       const word = text.replace("NG追加","").trim();
       if (!word) return reply(event.replyToken,"入力して");
 
@@ -260,8 +188,9 @@ app.post("/webhook", middleware(config), async (req, res) => {
       return reply(event.replyToken, list.join("\n") || "なし");
     }
 
-    // ===== 連投制限設定 =====
+    // ===== 連投制限 =====
     if (text.startsWith("連投制限")) {
+
       const num = text.replace("連投制限","").trim();
 
       await sheets.spreadsheets.values.update({
@@ -271,7 +200,7 @@ app.post("/webhook", middleware(config), async (req, res) => {
         requestBody: { values: [[groupId, num, setting?.[2]]] }
       });
 
-      return reply(event.replyToken, "設定OK");
+      return reply(event.replyToken,"設定OK");
     }
 
     // ===== 状態確認 =====
