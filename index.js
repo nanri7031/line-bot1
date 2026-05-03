@@ -34,11 +34,8 @@ const sheetId = process.env.SPREADSHEET_ID;
 
 // ===== 固定 =====
 const OWNER = "U1a1aca9e44466f8cb05003d7dc86fee0";
-const PASS = "1234";
 
 // ===== util =====
-const getMention = e => e.message.mention?.mentionees?.[0]?.userId;
-
 const getSheet = async (range) => {
   try {
     const res = await sheets.spreadsheets.values.get({
@@ -70,11 +67,12 @@ if(!e.source.groupId) continue;
 const g = e.source.groupId;
 const u = e.source.userId;
 
-// ===== BANチェック（管理者は無効）=====
+// ===== BANチェック（postbackは通す）=====
 const isAdminUser = await isAdmin(g,u);
 const banList = await getSheet("ban!A:B");
+const banned = banList.some(x=>x[0]===g && x[1]===u);
 
-if(banList.some(x=>x[0]===g && x[1]===u) && !isAdminUser){
+if(e.type !== "postback" && banned && !isAdminUser){
   await send(e,{type:"text",text:"🚫 利用制限中"});
   continue;
 }
@@ -84,9 +82,7 @@ if(e.type==="postback"){
 
 const d = e.postback.data;
 
-// ===== 確認→実行 =====
-
-// 管理削除
+// ===== 管理削除確認 =====
 if(d.startsWith("confirm_admin_delete:")){
 const id = d.split(":")[1];
 return send(e,{
@@ -103,6 +99,7 @@ actions:[
 });
 }
 
+// ===== 管理削除 =====
 if(d.startsWith("admin_delete:")){
 const id = d.split(":")[1];
 const rows = await getSheet("admins!A:B");
@@ -116,7 +113,7 @@ requestBody:{values:filtered}
 return send(e,{type:"text",text:"削除完了"});
 }
 
-// BAN確認
+// ===== BAN確認 =====
 if(d.startsWith("confirm_ban:")){
 const id = d.split(":")[1];
 
@@ -138,7 +135,7 @@ actions:[
 });
 }
 
-// BAN追加
+// ===== BAN追加 =====
 if(d.startsWith("ban_add:")){
 const id = d.split(":")[1];
 await sheets.spreadsheets.values.append({
@@ -150,7 +147,7 @@ requestBody:{values:[[g,id]]}
 return send(e,{type:"text",text:"BAN完了"});
 }
 
-// BAN解除
+// ===== BAN解除 =====
 if(d.startsWith("ban_remove:")){
 const id = d.split(":")[1];
 const rows = await getSheet("ban!A:B");
@@ -164,7 +161,7 @@ requestBody:{values:filtered}
 return send(e,{type:"text",text:"BAN解除"});
 }
 
-// NG削除
+// ===== NG削除 =====
 if(d.startsWith("ng_delete:")){
 const word = d.split(":")[1];
 const rows = await getSheet("ng!A:B");
@@ -187,7 +184,7 @@ const t = e.message.text.trim();
 
 // ===== menu =====
 if(t==="menu"){
-await send(e,{
+return send(e,{
 type:"flex",
 altText:"管理メニュー",
 contents:{
@@ -196,7 +193,6 @@ body:{
 type:"box",
 layout:"vertical",
 contents:[
-
 {type:"text",text:"管理メニュー",weight:"bold",size:"lg"},
 
 ...[
@@ -216,10 +212,20 @@ action:{type:"message",label:txt,text:txt}
 }
 }
 });
-continue;
 }
 
-// ===== 管理一覧（削除＋BAN）=====
+// ===== 状態確認 =====
+if(t.includes("状態確認")){
+const settings = await getSheet("settings!A:D");
+const row = settings.find(x=>x[0]===g);
+
+return send(e,{
+type:"text",
+text:`📊 状態\n連投制限: ${row?.[1] || "未設定"}\n挨拶: ${row?.[2] || "OFF"}`
+});
+}
+
+// ===== 管理一覧 =====
 if(t.includes("管理一覧")){
 const rows = await getSheet("admins!A:B");
 const list = rows.filter(x=>x[0]===g);
@@ -227,11 +233,10 @@ const list = rows.filter(x=>x[0]===g);
 const contents = [];
 
 for(const r of list){
-
-let name = r[1];
+let name=r[1];
 try{
-const p = await client.getGroupMemberProfile(g,r[1]);
-name = p.displayName;
+const p=await client.getGroupMemberProfile(g,r[1]);
+name=p.displayName;
 }catch{}
 
 contents.push({
@@ -269,7 +274,7 @@ body:{type:"box",layout:"vertical",contents:[
 });
 }
 
-// ===== NG一覧（削除）=====
+// ===== NG一覧 =====
 if(t.includes("NG一覧")){
 const rows = await getSheet("ng!A:B");
 const list = rows.filter(x=>x[0]===g);
@@ -302,7 +307,7 @@ body:{type:"box",layout:"vertical",contents:[
 });
 }
 
-// ===== BAN一覧（解除）=====
+// ===== BAN一覧 =====
 if(t.includes("BAN一覧")){
 const rows = await getSheet("ban!A:B");
 const list = rows.filter(x=>x[0]===g);
@@ -348,7 +353,7 @@ body:{type:"box",layout:"vertical",contents:[
 }
 
 }catch(err){
-console.log("致命エラー:",err);
+console.log("エラー:",err);
 }
 
 res.sendStatus(200);
