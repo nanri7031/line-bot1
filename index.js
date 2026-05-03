@@ -26,7 +26,25 @@ const SPREADSHEET_ID = process.env.SPREADSHEET_ID;
 // ===== 管理者 =====
 const OWNER_ID = "U1a1aca9e44466f8cb05003d7dc86fee0";
 
-// ===== 共通 =====
+// ===== userId取得（グループ対応） =====
+async function getUserId(event) {
+  if (event.source.userId) return event.source.userId;
+
+  if (event.source.type === "group") {
+    try {
+      const profile = await client.getGroupMemberProfile(
+        event.source.groupId,
+        event.source.userId
+      );
+      return profile.userId;
+    } catch {
+      return null;
+    }
+  }
+  return null;
+}
+
+// ===== 名前取得 =====
 async function getName(userId) {
   try {
     const p = await client.getProfile(userId);
@@ -36,6 +54,7 @@ async function getName(userId) {
   }
 }
 
+// ===== 管理者判定 =====
 async function isAdmin(userId) {
   if (userId === OWNER_ID) return true;
 
@@ -48,6 +67,7 @@ async function isAdmin(userId) {
   return rows.some(r => r[0] === userId);
 }
 
+// ===== 共通 =====
 async function addRow(sheet, values) {
   await sheets.spreadsheets.values.append({
     spreadsheetId: SPREADSHEET_ID,
@@ -95,7 +115,8 @@ function menuFlex() {
         type: "box",
         layout: "vertical",
         contents: [
-          title(),
+          { type:"text", text:"管理メニュー", size:"lg", weight:"bold", align:"center" },
+
           row("管理一覧","副管理一覧","#2563EB"),
           row("BAN一覧","NG一覧","#2563EB"),
           row("管理追加","管理削除","#60A5FA"),
@@ -107,16 +128,6 @@ function menuFlex() {
         ]
       }
     }
-  };
-}
-
-function title(){
-  return {
-    type:"text",
-    text:"管理メニュー",
-    size:"lg",
-    weight:"bold",
-    align:"center"
   };
 }
 
@@ -179,7 +190,8 @@ app.post("/webhook", line.middleware(config), async (req,res)=>{
     if(event.type !== "message") continue;
 
     const text = event.message.text;
-    const userId = event.source.userId;
+    const userId = await getUserId(event);
+    if(!userId) continue;
 
     if(text==="menu"){
       await client.replyMessage(event.replyToken,menuFlex());
