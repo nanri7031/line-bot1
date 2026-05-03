@@ -10,13 +10,19 @@ const config = {
 };
 const client = new Client(config);
 
-// ===== 安全返信 =====
+// ===== 修正版 send（最重要）=====
 const send = async (event, msg) => {
   try {
     await client.replyMessage(event.replyToken, msg);
   } catch {
-    if (event.source.userId) {
-      await client.pushMessage(event.source.userId, msg);
+    try {
+      if (event.source.groupId) {
+        await client.pushMessage(event.source.groupId, msg);
+      } else {
+        await client.pushMessage(event.source.userId, msg);
+      }
+    } catch (e) {
+      console.log("push失敗", e);
     }
   }
 };
@@ -37,7 +43,9 @@ const PASS = "1234";
 
 // ===== util =====
 const getMention = e => e.message.mention?.mentionees?.[0]?.userId;
-const getSheet = async r => (await sheets.spreadsheets.values.get({ spreadsheetId: sheetId, range: r })).data.values || [];
+const getSheet = async r => (await sheets.spreadsheets.values.get({
+  spreadsheetId: sheetId, range: r
+})).data.values || [];
 
 // ===== settings =====
 async function getSetting(g){
@@ -135,7 +143,7 @@ contents:[{type:"text",text:"管理メニュー",color:"#fff",align:"center",wei
 {type:"button",style:"primary",color:"#1565C0",action:{type:"message",label:"連投制限",text:"連投制限 5"}}
 ]},
 
-// 挨拶（黒ボタン白文字）
+// 挨拶（黒→白文字）
 {type:"box",layout:"horizontal",contents:[
 {type:"button",style:"primary",color:"#212121",action:{type:"message",label:"挨拶ON",text:"挨拶ON"}},
 {type:"button",style:"primary",color:"#424242",action:{type:"message",label:"挨拶OFF",text:"挨拶OFF"}}
@@ -152,7 +160,12 @@ continue;
 // ===== 管理登録 =====
 if(t.startsWith("管理登録")){
 if(t.split(" ")[1]!==PASS) return send(e,{type:"text",text:"パス違い"});
-await sheets.spreadsheets.values.append({spreadsheetId:sheetId,range:"admins!A:C",valueInputOption:"RAW",requestBody:{values:[[g,u,"管理者"]]}})
+await sheets.spreadsheets.values.append({
+spreadsheetId:sheetId,
+range:"admins!A:C",
+valueInputOption:"RAW",
+requestBody:{values:[[g,u,"管理者"]]}
+});
 await send(e,{type:"text",text:"登録OK"});
 continue;
 }
@@ -162,7 +175,12 @@ if(t.startsWith("管理追加")){
 if(!(await isAdmin(g,u))) return send(e,{type:"text",text:"管理者のみ"});
 const target=getMention(e);
 if(!target) return send(e,{type:"text",text:"メンションして"});
-await sheets.spreadsheets.values.append({spreadsheetId:sheetId,range:"admins!A:C",valueInputOption:"RAW",requestBody:{values:[[g,target,"追加"]]}})
+await sheets.spreadsheets.values.append({
+spreadsheetId:sheetId,
+range:"admins!A:C",
+valueInputOption:"RAW",
+requestBody:{values:[[g,target,"追加"]]}
+});
 await send(e,{type:"text",text:"管理追加OK"});
 continue;
 }
@@ -175,7 +193,12 @@ if(target===OWNER) return send(e,{type:"text",text:"削除不可"});
 const rows=await getSheet("admins!A:B");
 const filtered=rows.filter(x=>!(x[0]===g&&x[1]===target));
 await sheets.spreadsheets.values.clear({spreadsheetId:sheetId,range:"admins!A:B"});
-await sheets.spreadsheets.values.update({spreadsheetId:sheetId,range:"admins!A:B",valueInputOption:"RAW",requestBody:{values:filtered}});
+await sheets.spreadsheets.values.update({
+spreadsheetId:sheetId,
+range:"admins!A:B",
+valueInputOption:"RAW",
+requestBody:{values:filtered}
+});
 await send(e,{type:"text",text:"削除OK"});
 continue;
 }
@@ -192,7 +215,12 @@ continue;
 if(t.startsWith("副管理追加")){
 if(!(await isAdmin(g,u))) return send(e,{type:"text",text:"管理者のみ"});
 const target=getMention(e);
-await sheets.spreadsheets.values.append({spreadsheetId:sheetId,range:"subs!A:B",valueInputOption:"RAW",requestBody:{values:[[g,target]]}})
+await sheets.spreadsheets.values.append({
+spreadsheetId:sheetId,
+range:"subs!A:B",
+valueInputOption:"RAW",
+requestBody:{values:[[g,target]]}
+});
 await send(e,{type:"text",text:"副管理追加OK"});
 continue;
 }
@@ -203,7 +231,12 @@ const target=getMention(e);
 const rows=await getSheet("subs!A:B");
 const filtered=rows.filter(x=>!(x[0]===g&&x[1]===target));
 await sheets.spreadsheets.values.clear({spreadsheetId:sheetId,range:"subs!A:B"});
-await sheets.spreadsheets.values.update({spreadsheetId:sheetId,range:"subs!A:B",valueInputOption:"RAW",requestBody:{values:filtered}});
+await sheets.spreadsheets.values.update({
+spreadsheetId:sheetId,
+range:"subs!A:B",
+valueInputOption:"RAW",
+requestBody:{values:filtered}
+});
 await send(e,{type:"text",text:"削除OK"});
 continue;
 }
@@ -220,7 +253,12 @@ continue;
 if(t.startsWith("NG追加")){
 if(!(await isAdmin(g,u))) return send(e,{type:"text",text:"権限なし"});
 const w=t.replace("NG追加","").trim();
-await sheets.spreadsheets.values.append({spreadsheetId:sheetId,range:"ng!A:B",valueInputOption:"RAW",requestBody:{values:[[g,w]]}})
+await sheets.spreadsheets.values.append({
+spreadsheetId:sheetId,
+range:"ng!A:B",
+valueInputOption:"RAW",
+requestBody:{values:[[g,w]]}
+});
 await send(e,{type:"text",text:"追加OK"});
 continue;
 }
@@ -230,7 +268,12 @@ const w=t.replace("NG削除","").trim();
 const rows=await getSheet("ng!A:B");
 const filtered=rows.filter(x=>!(x[0]===g&&x[1]===w));
 await sheets.spreadsheets.values.clear({spreadsheetId:sheetId,range:"ng!A:B"});
-await sheets.spreadsheets.values.update({spreadsheetId:sheetId,range:"ng!A:B",valueInputOption:"RAW",requestBody:{values:filtered}});
+await sheets.spreadsheets.values.update({
+spreadsheetId:sheetId,
+range:"ng!A:B",
+valueInputOption:"RAW",
+requestBody:{values:filtered}
+});
 await send(e,{type:"text",text:"削除OK"});
 continue;
 }
