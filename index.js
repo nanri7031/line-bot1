@@ -4,14 +4,14 @@ import { google } from "googleapis";
 
 const app = express();
 
-// ================== LINE ==================
+// ================= LINE =================
 const config = {
   channelAccessToken: process.env.CHANNEL_ACCESS_TOKEN,
   channelSecret: process.env.CHANNEL_SECRET
 };
 const client = new line.Client(config);
 
-// ================== Google Sheets ==================
+// ================= Sheets =================
 const auth = new google.auth.JWT(
   process.env.GOOGLE_CLIENT_EMAIL,
   null,
@@ -22,170 +22,217 @@ const auth = new google.auth.JWT(
 const sheets = google.sheets({ version: "v4", auth });
 const SPREADSHEET_ID = process.env.SPREADSHEET_ID;
 
-// ================== 管理者 ==================
-const OWNER_ID = "U1a1aca9e44466f8cb05003d7dc86fee0";
+// ================= 設定 =================
+const OWNER = "U1a1aca9e44466f8cb05003d7dc86fee0";
 
-// ================== 共通関数 ==================
-async function getSheet(name) {
-  const res = await sheets.spreadsheets.values.get({
+// ================= 共通 =================
+const get = async (name) => {
+  const r = await sheets.spreadsheets.values.get({
     spreadsheetId: SPREADSHEET_ID,
     range: `${name}!A2:B`
   });
-  return res.data.values || [];
-}
+  return r.data.values || [];
+};
 
-async function addRow(sheet, values) {
+const add = async (name, row) => {
   await sheets.spreadsheets.values.append({
     spreadsheetId: SPREADSHEET_ID,
-    range: `${sheet}!A1`, // ←ここ修正済（重要）
+    range: `${name}!A1`,
     valueInputOption: "RAW",
-    requestBody: { values: [values] }
+    requestBody: { values: [row] }
   });
-}
+};
 
-async function isAdmin(userId) {
-  if (userId === OWNER_ID) return true;
-  const rows = await getSheet("admins");
-  return rows.some(r => r[0] === userId);
-}
+const del = async (name, value) => {
+  const rows = await get(name);
+  const filtered = rows.filter(r => r[0] !== value);
 
-// ================== Webhook ==================
+  await sheets.spreadsheets.values.clear({
+    spreadsheetId: SPREADSHEET_ID,
+    range: `${name}!A2:B`
+  });
+
+  if (filtered.length) {
+    await sheets.spreadsheets.values.update({
+      spreadsheetId: SPREADSHEET_ID,
+      range: `${name}!A2`,
+      valueInputOption: "RAW",
+      requestBody: { values: filtered }
+    });
+  }
+};
+
+const isAdmin = async (id) => {
+  if (id === OWNER) return true;
+  const admins = await get("admins");
+  const subs = await get("subs");
+  return [...admins, ...subs].some(r => r[0] === id);
+};
+
+// ================= Webhook =================
 app.post("/webhook", line.middleware(config), async (req, res) => {
-  Promise.all(req.body.events.map(handleEvent));
-  res.status(200).end();
+  await Promise.all(req.body.events.map(handle));
+  res.sendStatus(200);
 });
 
-// ================== イベント ==================
-async function handleEvent(event) {
+// ================= メイン =================
+async function handle(event) {
   if (event.type !== "message" || event.message.type !== "text") return;
 
   const text = event.message.text.trim();
   const userId = event.source.userId;
-
-  // ================== PING ==================
-  if (text === "ping") {
-    return reply(event, "OK");
-  }
-
-  // ================== MENU ==================
-  if (text === "menu") {
-    return replyFlex(event, menuFlex());
-  }
-
   const admin = await isAdmin(userId);
 
-  // ================== NG追加 ==================
+  // ===== ping =====
+  if (text === "ping") return reply(event, "OK");
+
+  // ===== menu =====
+  if (text === "menu") return replyFlex(event, menu());
+
+  // ===== NG追加 =====
   if (text.startsWith("NG追加")) {
     if (!admin) return reply(event, "管理者のみ");
 
     const word = text.replace("NG追加", "").trim();
     if (!word) return reply(event, "ワード入力して");
 
-    await addRow("ng", [word]);
-
+    await add("ng", [word]);
     return reply(event, `NG追加 OK\n${word}`);
   }
 
-  // ================== NG一覧 ==================
+  // ===== NG一覧 =====
   if (text === "NG一覧") {
-    const rows = await getSheet("ng");
-    if (rows.length === 0) return reply(event, "NGなし");
-
-    return replyFlex(event, listFlex("NG一覧", rows));
+    const rows = await get("ng");
+    return replyFlex(event, list("NG一覧", rows, "NG削除"));
   }
 
-  // ================== 管理一覧 ==================
+  // ===== NG削除 =====
+  if (text.startsWith("NG削除")) {
+    const w = text.replace("NG削除", "").trim();
+    await del("ng", w);
+    return reply(event, `削除 OK\n${w}`);
+  }
+
+  // ===== 管理追加 =====
+  if (text.startsWith("管理追加")) {
+    if (!admin) return reply(event, "管理者のみ");
+    const mention = event.message.mention?.mentionees?.[0];
+    if (!mention) return reply(event, "@指定して");
+    await add("admins", [mention.userId, "管理者"]);
+    return reply(event, "管理者追加 OK");
+  }
+
+  // ===== 副管理追加 =====
+  if (text.startsWith("副管理追加")) {
+    if (!admin) return reply(event, "管理者のみ");
+    const mention = event.message.mention?.mentionees?.[0];
+    if (!mention) return reply(event, "@指定して");
+    await add("subs", [mention.userId, "副管理"]);
+    return reply(event, "副管理追加 OK");
+  }
+
+  // ===== 通報→BAN =====
+  if (text.startsWith("通報")) {
+    if (!admin) return reply(event, "管理者のみ");
+    const mention = event.message.mention?.mentionees?.[0];
+    if (!mention) return reply(event, "@指定して");
+    await add("ban", [mention.userId]);
+    return reply(event, "BAN完了");
+  }
+
+  // ===== BAN解除 =====
+  if (text.startsWith("解除")) {
+    const mention = event.message.mention?.mentionees?.[0];
+    if (!mention) return reply(event, "@指定して");
+    await del("ban", mention.userId);
+    return reply(event, "BAN解除 OK");
+  }
+
+  // ===== 管理一覧 =====
   if (text === "管理一覧") {
-    const rows = await getSheet("admins");
-    return replyFlex(event, listFlex("管理一覧", rows));
+    return replyFlex(event, list("管理一覧", await get("admins"), "管理削除"));
   }
 
-  // ================== 副管理一覧 ==================
+  // ===== 副管理一覧 =====
   if (text === "副管理一覧") {
-    const rows = await getSheet("subs");
-    return replyFlex(event, listFlex("副管理一覧", rows));
+    return replyFlex(event, list("副管理一覧", await get("subs"), "副管理削除"));
   }
 
-  // ================== BAN一覧 ==================
+  // ===== BAN一覧 =====
   if (text === "BAN一覧") {
-    const rows = await getSheet("ban");
-    return replyFlex(event, listFlex("BAN一覧", rows));
+    return replyFlex(event, list("BAN一覧", await get("ban"), "BAN解除"));
   }
 
-  return reply(event, "コマンド未対応");
+  // ===== 連投制限 =====
+  if (text.startsWith("連投制限")) {
+    await add("settings", ["limit", text.replace("連投制限","").trim()]);
+    return reply(event, "設定OK");
+  }
+
+  return;
 }
 
-// ================== Flex ==================
-function menuFlex() {
-  return {
-    type: "bubble",
-    body: {
-      type: "box",
-      layout: "vertical",
-      contents: [
-        rowBtn("管理一覧","副管理一覧"),
-        rowBtn("BAN一覧","NG一覧"),
-        rowBtn("管理追加","管理削除"),
-        rowBtn("副管理追加","副管理削除"),
-        rowBtn("NG追加","通報"),
-        rowBtn("BAN解除","状態確認")
-      ]
-    }
-  };
-}
-
-function rowBtn(a,b){
-  return {
-    type:"box",
-    layout:"horizontal",
-    contents:[
-      btn(a),
-      btn(b)
+// ================= Flex =================
+const menu = () => ({
+  type: "bubble",
+  body: {
+    type: "box",
+    layout: "vertical",
+    contents: [
+      row("管理一覧","副管理一覧"),
+      row("BAN一覧","NG一覧"),
+      row("管理追加","管理削除"),
+      row("副管理追加","副管理削除"),
+      row("NG追加","通報"),
+      row("BAN解除","状態確認"),
+      row("連投制限","挨拶ON"),
+      row("挨拶OFF","挨拶確認")
     ]
   }
-}
+});
 
-function btn(label){
-  return {
-    type:"button",
-    style:"primary",
-    action:{type:"message",label,label,text:label}
+const row = (a,b)=>({
+  type:"box",
+  layout:"horizontal",
+  contents:[btn(a),btn(b)]
+});
+
+const btn = (t)=>({
+  type:"button",
+  style:"primary",
+  action:{type:"message",label:t,text:t}
+});
+
+const list = (title, rows, delCmd)=>({
+  type:"bubble",
+  body:{
+    type:"box",
+    layout:"vertical",
+    contents:[
+      {type:"text",text:title,weight:"bold"},
+      ...rows.map(r=>({
+        type:"box",
+        layout:"horizontal",
+        contents:[
+          {type:"text",text:r[0],flex:4},
+          {
+            type:"button",
+            style:"secondary",
+            action:{
+              type:"message",
+              label:"削除",
+              text:`${delCmd} ${r[0]}`
+            }
+          }
+        ]
+      }))
+    ]
   }
-}
+});
 
-function listFlex(title, rows){
-  return {
-    type:"bubble",
-    body:{
-      type:"box",
-      layout:"vertical",
-      contents:[
-        {type:"text",text:title,weight:"bold",size:"lg"},
-        ...rows.map(r=>({
-          type:"text",
-          text:r[1] ? `${r[1]} (${r[0]})` : r[0],
-          size:"sm"
-        }))
-      ]
-    }
-  };
-}
+// ================= reply =================
+const reply = (e,t)=>client.replyMessage(e.replyToken,{type:"text",text:t});
+const replyFlex = (e,f)=>client.replyMessage(e.replyToken,{type:"flex",altText:"menu",contents:f});
 
-// ================== 返信 ==================
-function reply(event, text) {
-  return client.replyMessage(event.replyToken, {
-    type: "text",
-    text
-  });
-}
-
-function replyFlex(event, flex) {
-  return client.replyMessage(event.replyToken, {
-    type: "flex",
-    altText: "menu",
-    contents: flex
-  });
-}
-
-// ================== 起動 ==================
+// ================= 起動 =================
 app.listen(process.env.PORT || 3000);
