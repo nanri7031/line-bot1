@@ -91,7 +91,7 @@ const admin = await isAdmin(g,u);
 const sub = await isSub(g,u);
 
 // =====================
-// 🔥 POSTBACK
+// POSTBACK
 // =====================
 if(e.type==="postback"){
 const d = e.postback.data;
@@ -134,7 +134,7 @@ const t = e.message.text.trim();
 const cmd = t.toLowerCase();
 
 // =====================
-// MENU（最優先）
+// MENU
 // =====================
 if(cmd==="menu"){
 return send(e,{
@@ -147,6 +147,7 @@ type:"box",
 layout:"vertical",
 contents:[
 {type:"text",text:"管理メニュー",weight:"bold",size:"lg"},
+
 ...[
 ["管理登録 1234","管理一覧"],
 ["管理追加","管理削除"],
@@ -166,6 +167,7 @@ let color="#1565C0";
 if(txt.includes("削除")||txt.includes("NG")) color="#D32F2F";
 if(txt.includes("BAN追加")||txt.includes("BAN一覧")) color="#000000";
 if(txt.includes("解除")) color="#2E7D32";
+
 return{
 type:"button",
 style:"primary",
@@ -182,136 +184,188 @@ action:{type:"message",label:txt.split(" ")[0],text:txt}
 }
 
 // =====================
-// NG検知
-// =====================
-const ng = await getSheet("ng!A:B");
-const words = ng.filter(x=>x[0]===g).map(x=>x[1]);
-if(words.some(w=>t.includes(w)) && !admin){
-return send(e,{type:"text",text:"⚠️ NGワード"});
-}
-
-// =====================
-// 連投制限
-// =====================
-const now = Date.now();
-spamMap[g]=spamMap[g]||{};
-spamMap[g][u]=spamMap[g][u]||[];
-spamMap[g][u].push(now);
-spamMap[g][u]=spamMap[g][u].filter(ts=>now-ts<10000);
-
-const set=await getSheet("settings!A:B");
-const row=set.find(x=>x[0]===g);
-const limit=Number(row?.[1]||5);
-
-if(spamMap[g][u].length>limit && !admin){
-return send(e,{type:"text",text:"🚫 連投制限"});
-}
-
-// =====================
-// 管理登録
-// =====================
-if(cmd.startsWith("管理登録")){
-const pass=t.replace("管理登録","").trim();
-if(pass!==PASS) return send(e,{type:"text",text:"パス違い"});
-await sheets.spreadsheets.values.append({
-spreadsheetId:sheetId,
-range:"admins!A:B",
-valueInputOption:"RAW",
-requestBody:{values:[[g,u]]}
-});
-return send(e,{type:"text",text:"管理者登録OK"});
-}
-
-// =====================
-// NG追加
-// =====================
-if(cmd.startsWith("ng追加")){
-if(!admin && !sub) return send(e,{type:"text",text:"権限なし"});
-const word=t.replace(/ng追加/i,"").trim();
-await sheets.spreadsheets.values.append({
-spreadsheetId:sheetId,
-range:"ng!A:B",
-valueInputOption:"RAW",
-requestBody:{values:[[g,word]]}
-});
-return send(e,{type:"text",text:"NG追加OK"});
-}
-
-// =====================
-// BAN追加
-// =====================
-if(cmd.startsWith("ban追加")){
-if(!admin) return send(e,{type:"text",text:"権限なし"});
-const mention=e.message.mention?.mentionees?.[0]?.userId;
-if(!mention) return send(e,{type:"text",text:"メンションして"});
-await sheets.spreadsheets.values.append({
-spreadsheetId:sheetId,
-range:"ban!A:B",
-valueInputOption:"RAW",
-requestBody:{values:[[g,mention]]}
-});
-return send(e,{type:"text",text:"BAN完了"});
-}
-
-// =====================
-// 一覧系
+// 管理一覧（名前表示＋削除ボタン）
 // =====================
 if(cmd==="管理一覧"){
 const rows=await getSheet("admins!A:B");
 const list=rows.filter(x=>x[0]===g);
+
 if(!list.length) return send(e,{type:"text",text:"なし"});
-return send(e,{type:"text",text:list.map(r=>r[1]).join("\n")});
+
+const contents = [];
+
+for(const r of list){
+let name = r[1];
+try{
+const p = await client.getGroupMemberProfile(g,r[1]);
+name = p.displayName;
+}catch{}
+
+contents.push({
+type:"box",
+layout:"horizontal",
+contents:[
+{type:"text",text:name,flex:3,wrap:true},
+{
+type:"button",
+style:"primary",
+color:"#D32F2F",
+action:{type:"postback",label:"削除",data:`admin_delete:${r[1]}`}
+}
+]
+});
 }
 
+return send(e,{
+type:"flex",
+altText:"管理一覧",
+contents:{
+type:"bubble",
+body:{
+type:"box",
+layout:"vertical",
+contents:[
+{type:"text",text:"管理一覧",weight:"bold"},
+...contents
+]
+}
+}
+});
+}
+
+// =====================
+// 副管理一覧（名前表示＋削除）
+// =====================
 if(cmd==="副管理一覧"){
 const rows=await getSheet("subs!A:B");
 const list=rows.filter(x=>x[0]===g);
+
 if(!list.length) return send(e,{type:"text",text:"なし"});
-return send(e,{type:"text",text:list.map(r=>r[1]).join("\n")});
+
+const contents = [];
+
+for(const r of list){
+let name = r[1];
+try{
+const p = await client.getGroupMemberProfile(g,r[1]);
+name = p.displayName;
+}catch{}
+
+contents.push({
+type:"box",
+layout:"horizontal",
+contents:[
+{type:"text",text:name,flex:3},
+{
+type:"button",
+style:"primary",
+color:"#F57C00",
+action:{type:"postback",label:"削除",data:`sub_delete:${r[1]}`}
+}
+]
+});
 }
 
+return send(e,{
+type:"flex",
+altText:"副管理一覧",
+contents:{
+type:"bubble",
+body:{
+type:"box",
+layout:"vertical",
+contents:[
+{type:"text",text:"副管理一覧",weight:"bold"},
+...contents
+]
+}
+}
+});
+}
+
+// =====================
+// NG一覧（削除ボタン）
+// =====================
 if(cmd==="ng一覧"){
 const rows=await getSheet("ng!A:B");
 const list=rows.filter(x=>x[0]===g);
-return send(e,{type:"text",text:list.map(r=>r[1]).join("\n")||"なし"});
+
+return send(e,{
+type:"flex",
+altText:"NG一覧",
+contents:{
+type:"bubble",
+body:{
+type:"box",
+layout:"vertical",
+contents:[
+{type:"text",text:"NG一覧",weight:"bold"},
+...list.map(r=>({
+type:"box",
+layout:"horizontal",
+contents:[
+{type:"text",text:r[1],flex:3},
+{
+type:"button",
+style:"primary",
+color:"#D32F2F",
+action:{type:"postback",label:"削除",data:`ng_delete:${r[1]}`}
+}
+]
+}))
+]
+}
+}
+});
 }
 
+// =====================
+// BAN一覧（解除ボタン）
+// =====================
 if(cmd==="ban一覧"){
 const rows=await getSheet("ban!A:B");
 const list=rows.filter(x=>x[0]===g);
-return send(e,{type:"text",text:list.map(r=>r[1]).join("\n")||"なし"});
+
+if(!list.length) return send(e,{type:"text",text:"なし"});
+
+return send(e,{
+type:"flex",
+altText:"BAN一覧",
+contents:{
+type:"bubble",
+body:{
+type:"box",
+layout:"vertical",
+contents:[
+{type:"text",text:"BAN一覧",weight:"bold"},
+...list.map(r=>({
+type:"box",
+layout:"horizontal",
+contents:[
+{type:"text",text:r[1],flex:3},
+{
+type:"button",
+style:"primary",
+color:"#2E7D32",
+action:{type:"postback",label:"解除",data:`ban_remove:${r[1]}`}
+}
+]
+}))
+]
+}
+}
+});
 }
 
 // =====================
 // 状態確認
 // =====================
 if(cmd==="状態確認"){
-return send(e,{type:"text",text:`連投制限:${limit}`});
-}
+const set=await getSheet("settings!A:B");
+const row=set.find(x=>x[0]===g);
+const limit=Number(row?.[1]||5);
 
-// =====================
-// 挨拶
-// =====================
-if(cmd==="挨拶on"){
-await setSheet("settings!A:C",[[g,limit,"ON"]]);
-return send(e,{type:"text",text:"挨拶ON"});
-}
-
-if(cmd==="挨拶off"){
-await setSheet("settings!A:C",[[g,limit,"OFF"]]);
-return send(e,{type:"text",text:"挨拶OFF"});
-}
-
-if(cmd.startsWith("挨拶登録")){
-const msg=t.replace("挨拶登録","").trim();
-await setSheet("settings!A:C",[[g,limit,msg]]);
-return send(e,{type:"text",text:"挨拶登録OK"});
-}
-
-if(cmd==="挨拶確認"){
-const rows=await getSheet("settings!A:C");
-const r=rows.find(x=>x[0]===g);
-return send(e,{type:"text",text:r?.[2]||"未設定"});
+return send(e,{type:"text",text:`📊 状態\n連投制限:${limit}`});
 }
 
 }
