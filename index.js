@@ -190,7 +190,7 @@ contents:[
 ["NG追加 test","NG一覧"],
 ["NG削除 test","連投制限 5"],
 ["BAN追加","BAN解除"],
-["BAN一覧","状態確認"],
+["BAN一覧","通報"],
 ["挨拶ON","挨拶OFF"],
 ["挨拶登録 ようこそ！","挨拶確認"]
 ].map(row=>({
@@ -310,17 +310,54 @@ contents:{type:"bubble",body:{type:"box",layout:"vertical",contents:[
 }
 
 // =====================
-// 副管理一覧
+// 副管理一覧（修正済み）
 // =====================
 if(cmd==="副管理一覧"){
 const rows=await getSheet("subs!A:B");
 const list=rows.filter(x=>x[0]===g);
 if(!list.length) return send(e,{type:"text",text:"なし"});
-return send(e,{type:"text",text:list.map(r=>r[1]).join("\n")});
+
+const contents=[];
+for(const r of list){
+let name=r[1];
+try{
+const p=await client.getGroupMemberProfile(g,r[1]);
+name=p.displayName;
+}catch{}
+
+contents.push({
+type:"box",
+layout:"horizontal",
+contents:[
+{type:"text",text:name,flex:3,wrap:true},
+{type:"button",style:"primary",color:"#D32F2F",action:{type:"postback",label:"削除",data:`sub_delete:${r[1]}`}}
+]
+});
+}
+
+return send(e,{
+type:"flex",
+altText:"副管理一覧",
+contents:{type:"bubble",body:{type:"box",layout:"vertical",contents:[
+{type:"text",text:"副管理一覧",weight:"bold"},
+...contents
+]}}
+});
 }
 
 // =====================
-// NG追加
+// 通報（新規）
+// =====================
+if(cmd==="通報"){
+await client.pushMessage(OWNER,{
+type:"text",
+text:`通報\nグループ:${g}\nユーザー:${u}`
+});
+return send(e,{type:"text",text:"通報しました"});
+}
+
+// =====================
+// NG追加（重複防止）
 // =====================
 if(cmd.startsWith("ng追加")){
 if(!admin && !sub) return send(e,{type:"text",text:"権限なし"});
