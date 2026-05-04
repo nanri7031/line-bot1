@@ -11,6 +11,9 @@ const config = {
 };
 const client = new Client(config);
 
+// ===== 重複防止 =====
+const processed = new Set();
+
 // ===== 安定返信 =====
 const send = async (e, msg) => {
   try {
@@ -79,6 +82,13 @@ try{
 
 for(const e of req.body.events){
 
+// ===== 重複防止 =====
+const eid = e.message?.id || e.postback?.data || JSON.stringify(e);
+if(processed.has(eid)) continue;
+processed.add(eid);
+if(processed.size > 5000) processed.clear();
+
+// ===== グループ限定 =====
 if(!e.source.groupId) continue;
 
 const g = e.source.groupId;
@@ -93,7 +103,7 @@ const sub = await isSub(g,u);
 if(e.type==="postback"){
 const d = e.postback.data;
 
-// 管理追加確定
+// 管理追加
 if(d.startsWith("admin_add:")){
 const id = d.split(":")[1];
 await sheets.spreadsheets.values.append({
@@ -113,7 +123,7 @@ await setSheet("admins!A:B", rows.filter(x=>!(x[0]===g && x[1]===id)));
 return send(e,{type:"text",text:"管理削除完了"});
 }
 
-// 副管理追加確定
+// 副管理追加
 if(d.startsWith("sub_add:")){
 const id = d.split(":")[1];
 await sheets.spreadsheets.values.append({
@@ -159,7 +169,7 @@ const t = e.message.text.trim();
 const cmd = t.toLowerCase();
 
 // =====================
-// MENU（フルUI）
+// MENU
 // =====================
 if(cmd==="menu"){
 return send(e,{
@@ -172,7 +182,6 @@ type:"box",
 layout:"vertical",
 contents:[
 {type:"text",text:"管理メニュー",weight:"bold",size:"lg"},
-
 ...[
 ["管理登録 1234","管理一覧"],
 ["管理追加","管理削除"],
@@ -223,7 +232,7 @@ return send(e,{type:"text",text:"管理登録OK"});
 }
 
 // =====================
-// 管理追加（確認）
+// 管理追加
 // =====================
 if(cmd.startsWith("管理追加")){
 if(!admin) return send(e,{type:"text",text:"権限なし"});
@@ -244,7 +253,7 @@ actions:[
 }
 
 // =====================
-// 副管理追加（確認）
+// 副管理追加
 // =====================
 if(cmd.startsWith("副管理追加")){
 if(!admin) return send(e,{type:"text",text:"権限なし"});
@@ -265,7 +274,7 @@ actions:[
 }
 
 // =====================
-// 管理一覧（UI＋名前＋削除）
+// 管理一覧
 // =====================
 if(cmd==="管理一覧"){
 const rows=await getSheet("admins!A:B");
@@ -316,6 +325,12 @@ return send(e,{type:"text",text:list.map(r=>r[1]).join("\n")});
 if(cmd.startsWith("ng追加")){
 if(!admin && !sub) return send(e,{type:"text",text:"権限なし"});
 const word=t.replace(/ng追加/i,"").trim();
+
+const rows = await getSheet("ng!A:B");
+if(rows.some(x=>x[0]===g && x[1]===word)){
+return send(e,{type:"text",text:"既に登録済み"});
+}
+
 await sheets.spreadsheets.values.append({
 spreadsheetId:sheetId,
 range:"ng!A:B",
@@ -420,7 +435,7 @@ return send(e,{type:"text",text:`連投制限:${num}`});
 }
 
 // =====================
-// 挨拶ON/OFF・登録・確認
+// 挨拶ON/OFF
 // =====================
 if(cmd==="挨拶on"){
 const rows = await getSheet("settings!A:D");
@@ -446,6 +461,9 @@ old?.[3] || ""
 return send(e,{type:"text",text:"挨拶OFF"});
 }
 
+// =====================
+// 挨拶登録
+// =====================
 if(cmd.startsWith("挨拶登録")){
 const msg=t.replace("挨拶登録","").trim();
 const rows = await getSheet("settings!A:D");
@@ -459,6 +477,9 @@ msg
 return send(e,{type:"text",text:"挨拶登録OK"});
 }
 
+// =====================
+// 挨拶確認
+// =====================
 if(cmd==="挨拶確認"){
 const rows = await getSheet("settings!A:D");
 const r = rows.find(x=>x[0]===g);
