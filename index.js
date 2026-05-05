@@ -310,7 +310,7 @@ contents:{type:"bubble",body:{type:"box",layout:"vertical",contents:[
 }
 
 // =====================
-// 副管理一覧（修正済み）
+// 副管理一覧
 // =====================
 if(cmd==="副管理一覧"){
 const rows=await getSheet("subs!A:B");
@@ -346,18 +346,45 @@ contents:{type:"bubble",body:{type:"box",layout:"vertical",contents:[
 }
 
 // =====================
-// 通報（新規）
+// 通報（★修正済み）
 // =====================
 if(cmd==="通報"){
+
+let userName = u;
+let groupName = g;
+
+try{
+const profile = await client.getGroupMemberProfile(g, u);
+userName = profile.displayName;
+}catch{}
+
+try{
+const summary = await client.getGroupSummary(g);
+groupName = summary.groupName;
+}catch{}
+
 await client.pushMessage(OWNER,{
 type:"text",
-text:`通報\nグループ:${g}\nユーザー:${u}`
+text:`通報が来ました
+
+■グループ
+${groupName}
+
+■ユーザー
+${userName}
+
+■ユーザーID
+${u}
+
+■グループID
+${g}`
 });
+
 return send(e,{type:"text",text:"通報しました"});
 }
 
 // =====================
-// NG追加（重複防止）
+// NG追加
 // =====================
 if(cmd.startsWith("ng追加")){
 if(!admin && !sub) return send(e,{type:"text",text:"権限なし"});
