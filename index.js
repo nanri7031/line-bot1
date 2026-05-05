@@ -18,9 +18,8 @@ const processed = new Set();
 const send = async (e, msg) => {
   try {
     await client.replyMessage(e.replyToken, msg);
-  } catch {
-    const id = e.source.groupId || e.source.userId;
-    try { await client.pushMessage(id, msg); } catch {}
+  } catch (err) {
+    console.log("reply失敗:", err);
   }
 };
 
@@ -38,7 +37,6 @@ const sheetId = process.env.SPREADSHEET_ID;
 // ===== 設定 =====
 const OWNER = "U1a1aca9e44466f8cb05003d7dc86fee0";
 const PASS = "1234";
-// ★ここ追加★
 const ADMIN_GROUP = "C3508f35d1033c94727550697070fb0b0";
 
 // ===== util =====
@@ -85,7 +83,10 @@ try{
 for(const e of req.body.events){
 
 // ===== 重複防止 =====
-const eid = e.message?.id || (e.postback?.data + Date.now()) || JSON.stringify(e);
+const eid =
+  e.message?.id ||
+  (e.postback?.data ? e.postback.data + Date.now() : null) ||
+  JSON.stringify(e);
 if(processed.has(eid)) continue;
 processed.add(eid);
 if(processed.size > 5000) processed.clear();
@@ -170,14 +171,13 @@ if(e.type!=="message"||e.message.type!=="text") continue;
 const t = e.message.text.trim();
 const cmd = t.toLowerCase();
 
-// ===== GID取得（ここに追加）=====
+// ===== GID取得 =====
 if(cmd === "gid"){
   return send(e,{
     type:"text",
     text:`${g}`
   });
 }
-
 // =====================
 // MENU
 // =====================
@@ -320,7 +320,7 @@ contents:{type:"bubble",body:{type:"box",layout:"vertical",contents:[
 }
 
 // =====================
-// 副管理一覧（修正済み）
+// 副管理一覧
 // =====================
 if(cmd==="副管理一覧"){
 const rows=await getSheet("subs!A:B");
@@ -356,7 +356,7 @@ contents:{type:"bubble",body:{type:"box",layout:"vertical",contents:[
 }
 
 // =====================
-// 通報（新規）
+// 通報（無料修正）
 // =====================
 if(cmd==="通報"){
 let name = u;
@@ -365,20 +365,14 @@ try{
   name = p.displayName;
 }catch{}
 
-// 管理部屋へ送る（1秒遅らせる）
-setTimeout(()=>{
-  client.pushMessage(ADMIN_GROUP,{
-    type:"text",
-    text:`通報\n名前:${name}\nユーザーID:${u}\nグループID:${g}`
-  });
-},1000);
-
-// グループに返信
-return send(e,{type:"text",text:"通報しました"});
+return send(e,{
+  type:"text",
+  text:`通報\n名前:${name}\nユーザーID:${u}\nグループID:${g}`
+});
 }
 
 // =====================
-// NG追加（重複防止）
+// NG追加
 // =====================
 if(cmd.startsWith("ng追加")){
 if(!admin && !sub) return send(e,{type:"text",text:"権限なし"});
@@ -397,7 +391,6 @@ requestBody:{values:[[g,word]]}
 });
 return send(e,{type:"text",text:"NG追加OK"});
 }
-
 // =====================
 // NG一覧
 // =====================
