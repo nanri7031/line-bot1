@@ -38,6 +38,8 @@ const sheetId = process.env.SPREADSHEET_ID;
 // ===== 設定 =====
 const OWNER = "U1a1aca9e44466f8cb05003d7dc86fee0";
 const PASS = "1234";
+// ★ここ追加★
+const ADMIN_GROUP = "C3508f35d1033c94727550697070fb0b0";
 
 // ===== util =====
 const getSheet = async (range) => {
@@ -363,9 +365,9 @@ try{
   name = p.displayName;
 }catch{}
 
-// 管理者へ送る（1秒遅らせる）
+// 管理部屋へ送る（1秒遅らせる）
 setTimeout(()=>{
-  client.pushMessage(OWNER,{
+  client.pushMessage(ADMIN_GROUP,{
     type:"text",
     text:`通報\n名前:${name}\nユーザーID:${u}\nグループID:${g}`
   });
