@@ -103,7 +103,6 @@ const sub = await isSub(g,u);
 if(e.type==="postback"){
 const d = e.postback.data;
 
-// 管理追加
 if(d.startsWith("admin_add:")){
 const id = d.split(":")[1];
 await sheets.spreadsheets.values.append({
@@ -115,7 +114,6 @@ requestBody:{values:[[g,id]]}
 return send(e,{type:"text",text:"管理追加完了"});
 }
 
-// 管理削除
 if(d.startsWith("admin_delete:")){
 const id = d.split(":")[1];
 const rows = await getSheet("admins!A:B");
@@ -123,7 +121,6 @@ await setSheet("admins!A:B", rows.filter(x=>!(x[0]===g && x[1]===id)));
 return send(e,{type:"text",text:"管理削除完了"});
 }
 
-// 副管理追加
 if(d.startsWith("sub_add:")){
 const id = d.split(":")[1];
 await sheets.spreadsheets.values.append({
@@ -135,7 +132,6 @@ requestBody:{values:[[g,id]]}
 return send(e,{type:"text",text:"副管理追加完了"});
 }
 
-// 副管理削除
 if(d.startsWith("sub_delete:")){
 const id = d.split(":")[1];
 const rows = await getSheet("subs!A:B");
@@ -143,7 +139,6 @@ await setSheet("subs!A:B", rows.filter(x=>!(x[0]===g && x[1]===id)));
 return send(e,{type:"text",text:"副管理削除完了"});
 }
 
-// NG削除
 if(d.startsWith("ng_delete:")){
 const word = d.split(":")[1];
 const rows = await getSheet("ng!A:B");
@@ -151,7 +146,6 @@ await setSheet("ng!A:B", rows.filter(x=>!(x[0]===g && x[1]===word)));
 return send(e,{type:"text",text:"NG削除完了"});
 }
 
-// BAN解除
 if(d.startsWith("ban_remove:")){
 const id = d.split(":")[1];
 const rows = await getSheet("ban!A:B");
@@ -346,9 +340,9 @@ contents:{type:"bubble",body:{type:"box",layout:"vertical",contents:[
 }
 
 // =====================
-// 通報（★修正済み）
+// 通報（修正済み）
 // =====================
-if(cmd==="通報"){
+if(cmd.includes("通報")){
 
 let userName = u;
 let groupName = g;
