@@ -83,7 +83,7 @@ try{
 for(const e of req.body.events){
 
 // ===== 重複防止 =====
-const eid = e.message?.id || e.postback?.data || JSON.stringify(e);
+const const eid = e.message?.id || (e.postback?.data + Date.now()) || JSON.stringify(e);
 if(processed.has(eid)) continue;
 processed.add(eid);
 if(processed.size > 5000) processed.clear();
@@ -349,10 +349,21 @@ contents:{type:"bubble",body:{type:"box",layout:"vertical",contents:[
 // 通報（新規）
 // =====================
 if(cmd==="通報"){
-await client.pushMessage(OWNER,{
-type:"text",
-text:`通報\nグループ:${g}\nユーザー:${u}`
-});
+let name = u;
+try{
+  const p = await client.getGroupMemberProfile(g,u);
+  name = p.displayName;
+}catch{}
+
+// 管理者へ送る（1秒遅らせる）
+setTimeout(()=>{
+  client.pushMessage(OWNER,{
+    type:"text",
+    text:`通報\n名前:${name}\nユーザーID:${u}\nグループID:${g}`
+  });
+},1000);
+
+// グループに返信
 return send(e,{type:"text",text:"通報しました"});
 }
 
