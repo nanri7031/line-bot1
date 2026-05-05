@@ -168,6 +168,14 @@ if(e.type!=="message"||e.message.type!=="text") continue;
 const t = e.message.text.trim();
 const cmd = t.toLowerCase();
 
+// ===== GID取得（ここに追加）=====
+if(cmd === "gid"){
+  return send(e,{
+    type:"text",
+    text:`${g}`
+  });
+}
+
 // =====================
 // MENU
 // =====================
