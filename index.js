@@ -544,7 +544,20 @@ if(cmd.startsWith("挨拶登録")){
 
   return send(e,{type:"text",text:"挨拶登録OK"});
 }
+  
+// =====================
+// 挨拶確認
+// =====================
+if(cmd==="挨拶確認"){
+  const rows = await getSheet("settings!A:D");
+  const r = rows.find(x=>x[0]===g);
 
+  return send(e,{
+    type:"text",
+    text:`挨拶:${r?.[2] || "OFF"}\n内容:${r?.[3] || "未設定"}`
+  });
+}
+  
 // =====================
 // 状態確認
 // =====================
