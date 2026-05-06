@@ -515,26 +515,34 @@ return send(e,{type:"text",text:"挨拶OFF"});
 // =====================
 // 挨拶登録
 // =====================
+// 挨拶登録（修正版）
 if(cmd.startsWith("挨拶登録")){
-const msg=t.replace("挨拶登録","").trim();
-const rows = await getSheet("settings!A:D");
-const old = rows.find(x=>x[0]===g);
-await setSheet("settings!A:D",[[
-g,
-old?.[1] || 5,
-old?.[2] || "ON",
-msg
-]]);
-return send(e,{type:"text",text:"挨拶登録OK"});
-}
+  const msg = cmd.replace("挨拶登録","").trim();
 
-// =====================
-// 挨拶確認
-// =====================
-if(cmd==="挨拶確認"){
-const rows = await getSheet("settings!A:D");
-const r = rows.find(x=>x[0]===g);
-return send(e,{type:"text",text:`挨拶:${r?.[2]||"OFF"}\n内容:${r?.[3]||"未設定"}`});
+  const rows = await getSheet("settings!A:D");
+
+  let updated = false;
+
+  const newRows = rows.map(r=>{
+    if(r[0] === g){
+      updated = true;
+      return [
+        g,
+        r[1] || 5,
+        r[2] || "ON",
+        msg
+      ];
+    }
+    return r;
+  });
+
+  if(!updated){
+    newRows.push([g,5,"ON",msg]);
+  }
+
+  await setSheet("settings!A:D", newRows);
+
+  return send(e,{type:"text",text:"挨拶登録OK"});
 }
 
 // =====================
