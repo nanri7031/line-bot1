@@ -517,34 +517,36 @@ return send(e,{type:"text",text:"挨拶OFF"});
 // =====================
 // 挨拶登録（修正版）
 if(cmd.startsWith("挨拶登録")){
-  const msg = cmd.replace("挨拶登録","").trim();
+  const msg = t.replace("挨拶登録","").trim();
 
   const rows = await getSheet("settings!A:D");
 
-  let updated = false;
+  let found = false;
 
-  const newRows = rows.map(r=>{
-    if(r[0] === g){
-      updated = true;
-      return [
+  for(let i=0;i<rows.length;i++){
+    if(rows[i][0] === g){
+      rows[i] = [
         g,
-        r[1] || 5,
-        r[2] || "ON",
+        rows[i][1] || 5,
+        rows[i][2] || "ON",
         msg
       ];
+      found = true;
     }
-    return r;
-  });
-
-  if(!updated){
-    newRows.push([g,5,"ON",msg]);
   }
 
-  await setSheet("settings!A:D", newRows);
+  if(!found){
+    rows.push([g,5,"ON",msg]);
+  }
 
-  return send(e,{type:"text",text:"挨拶登録OK"});
+  await setSheet("settings!A:D", rows);
+
+  return send(e,{
+    type:"text",
+    text:"挨拶登録OK"
+  });
 }
-  
+
 // =====================
 // 挨拶確認
 // =====================
