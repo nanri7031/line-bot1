@@ -472,17 +472,36 @@ contents:[
 // 連投制限
 // =====================
 if(cmd.startsWith("連投制限")){
-if(!admin) return send(e,{type:"text",text:"権限なし"});
-const num = t.replace("連投制限","").trim();
-const rows = await getSheet("settings!A:D");
-const old = rows.find(x=>x[0]===g);
-await setSheet("settings!A:D",[[
-g,
-num,
-old?.[2] || "OFF",
-old?.[3] || ""
-]]);
-return send(e,{type:"text",text:`連投制限:${num}`});
+  if(!admin) return send(e,{type:"text",text:"権限なし"});
+
+  const num = t.replace("連投制限","").trim();
+
+  const rows = await getSheet("settings!A:D");
+
+  let found = false;
+
+  for(let i=0;i<rows.length;i++){
+    if(rows[i][0] === g){
+      rows[i] = [
+        g,
+        num,
+        rows[i][2] || "OFF",
+        rows[i][3] || ""
+      ];
+      found = true;
+    }
+  }
+
+  if(!found){
+    rows.push([g,num,"OFF",""]);
+  }
+
+  await setSheet("settings!A:D", rows);
+
+  return send(e,{
+    type:"text",
+    text:`連投制限:${num}`
+  });
 }
 
 // =====================
