@@ -508,27 +508,61 @@ if(cmd.startsWith("連投制限")){
 // 挨拶ON/OFF
 // =====================
 if(cmd==="挨拶on"){
-const rows = await getSheet("settings!A:D");
-const old = rows.find(x=>x[0]===g);
-await setSheet("settings!A:D",[[
-g,
-old?.[1] || 5,
-"ON",
-old?.[3] || ""
-]]);
-return send(e,{type:"text",text:"挨拶ON"});
+  const rows = await getSheet("settings!A:D");
+
+  let found = false;
+
+  for(let i=0;i<rows.length;i++){
+    if(rows[i][0] === g){
+      rows[i] = [
+        g,
+        rows[i][1] || 5,
+        "ON",
+        rows[i][3] || ""
+      ];
+      found = true;
+    }
+  }
+
+  if(!found){
+    rows.push([g,5,"ON",""]);
+  }
+
+  await setSheet("settings!A:D", rows);
+
+  return send(e,{
+    type:"text",
+    text:"挨拶ON"
+  });
 }
 
 if(cmd==="挨拶off"){
-const rows = await getSheet("settings!A:D");
-const old = rows.find(x=>x[0]===g);
-await setSheet("settings!A:D",[[
-g,
-old?.[1] || 5,
-"OFF",
-old?.[3] || ""
-]]);
-return send(e,{type:"text",text:"挨拶OFF"});
+  const rows = await getSheet("settings!A:D");
+
+  let found = false;
+
+  for(let i=0;i<rows.length;i++){
+    if(rows[i][0] === g){
+      rows[i] = [
+        g,
+        rows[i][1] || 5,
+        "OFF",
+        rows[i][3] || ""
+      ];
+      found = true;
+    }
+  }
+
+  if(!found){
+    rows.push([g,5,"OFF",""]);
+  }
+
+  await setSheet("settings!A:D", rows);
+
+  return send(e,{
+    type:"text",
+    text:"挨拶OFF"
+  });
 }
 
 // =====================
