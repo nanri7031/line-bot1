@@ -204,7 +204,7 @@ const hitWord = ngList.find(word =>
 
 if(hitWord){
 
-  return send(e,{
+  await send(e,{
     type:"text",
     text:`⚠️ NGワード検知\n「${hitWord}」`
   });
