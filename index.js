@@ -190,7 +190,137 @@ if(hitWord){
     text:`⚠️ NGワード検知\n「${hitWord}」`
   });
 }
-  
+
+// =====================
+// ブラックリスト
+// =====================
+const blackRows = await getSheet("black!A:B");
+
+// =====================
+// BAN確認
+// =====================
+const banRows = await getSheet("ban!A:B");
+
+const isBanned = banRows.some(x =>
+  x[0] === g && x[1] === u
+);
+
+if(isBanned){
+  return send(e,{
+    type:"text",
+    text:"⚠️ BAN対象ユーザー\n管理者は退会処理してください"
+  });
+}
+
+// =====================
+// 即BANワード
+// =====================
+const instantBanWords = [
+  "死ね",
+  "グロ",
+  "詐欺"
+];
+
+const hitInstant = instantBanWords.find(word =>
+  t.includes(word)
+);
+
+if(hitInstant){
+
+  // BAN登録
+  await sheets.spreadsheets.values.append({
+    spreadsheetId:sheetId,
+    range:"ban!A:B",
+    valueInputOption:"RAW",
+    requestBody:{
+      values:[[g,u]]
+    }
+  });
+
+  // ブラックリスト保存
+  if(!blackRows.some(x => x[1] === u)){
+    await sheets.spreadsheets.values.append({
+      spreadsheetId:sheetId,
+      range:"black!A:B",
+      valueInputOption:"RAW",
+      requestBody:{
+        values:[[g,u]]
+      }
+    });
+  }
+
+  return send(e,{
+    type:"text",
+    text:`⚠️ 即BAN\n禁止ワード:${hitInstant}`
+  });
+}
+
+// =====================
+// 連投監視
+// =====================
+global.floodMap ??= {};
+
+if(!global.floodMap[g]){
+  global.floodMap[g] = {};
+}
+
+if(!global.floodMap[g][u]){
+  global.floodMap[g][u] = [];
+}
+
+const now = Date.now();
+
+// 10秒以内のみ保持
+global.floodMap[g][u] =
+  global.floodMap[g][u]
+    .filter(time => now - time < 10000);
+
+global.floodMap[g][u].push(now);
+
+// settings取得
+const settingRows = await getSheet("settings!A:D");
+
+const setting =
+  settingRows.find(x => x[0] === g);
+
+const limit =
+  Number(setting?.[1] || 5);
+
+// 連投BAN
+if(global.floodMap[g][u].length >= limit){
+
+  // BAN登録
+  if(!banRows.some(x =>
+    x[0] === g && x[1] === u
+  )){
+    await sheets.spreadsheets.values.append({
+      spreadsheetId:sheetId,
+      range:"ban!A:B",
+      valueInputOption:"RAW",
+      requestBody:{
+        values:[[g,u]]
+      }
+    });
+  }
+
+  // ブラックリスト保存
+  if(!blackRows.some(x => x[1] === u)){
+    await sheets.spreadsheets.values.append({
+      spreadsheetId:sheetId,
+      range:"black!A:B",
+      valueInputOption:"RAW",
+      requestBody:{
+        values:[[g,u]]
+      }
+    });
+  }
+
+  return send(e,{
+    type:"text",
+    text:"⚠️ 連投BAN\n管理者は退会処理してください"
+  });
+}
+
 // ===== GID取得 =====
 if(cmd === "gid"){
   return send(e,{
