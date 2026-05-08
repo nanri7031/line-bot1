@@ -109,13 +109,28 @@ const d = e.postback.data;
 // 管理追加
 if(d.startsWith("admin_add:")){
 const id = d.split(":")[1];
+
+const rows = await getSheet("admins!A:B");
+
+// 重複防止
+if(rows.some(x => x[0] === g && x[1] === id)){
+  return send(e,{
+    type:"text",
+    text:"既に管理です"
+  });
+}
+
 await sheets.spreadsheets.values.append({
 spreadsheetId:sheetId,
 range:"admins!A:B",
 valueInputOption:"RAW",
 requestBody:{values:[[g,id]]}
 });
-return send(e,{type:"text",text:"管理追加完了"});
+
+return send(e,{
+type:"text",
+text:"管理追加完了"
+});
 }
 
 // 管理削除
@@ -129,13 +144,28 @@ return send(e,{type:"text",text:"管理削除完了"});
 // 副管理追加
 if(d.startsWith("sub_add:")){
 const id = d.split(":")[1];
+
+const rows = await getSheet("subs!A:B");
+
+// 重複防止
+if(rows.some(x => x[0] === g && x[1] === id)){
+  return send(e,{
+    type:"text",
+    text:"既に副管理です"
+  });
+}
+
 await sheets.spreadsheets.values.append({
 spreadsheetId:sheetId,
 range:"subs!A:B",
 valueInputOption:"RAW",
 requestBody:{values:[[g,id]]}
 });
-return send(e,{type:"text",text:"副管理追加完了"});
+
+return send(e,{
+type:"text",
+text:"副管理追加完了"
+});
 }
 
 // 副管理削除
@@ -262,6 +292,9 @@ const hitInstant = instantBanWords.find(word =>
 if(hitInstant){
 
   // BAN登録
+  if(!banRows.some(x =>
+  x[0] === g && x[1] === u
+)){
   await sheets.spreadsheets.values.append({
     spreadsheetId:sheetId,
     range:"ban!A:B",
@@ -270,6 +303,7 @@ if(hitInstant){
       values:[[g,u]]
     }
   });
+}
 
   // ブラックリスト保存
   if(!blackRows.some(x => x[1] === u)){
@@ -609,18 +643,46 @@ contents:[
 // BAN追加
 // =====================
 if(cmd.startsWith("ban追加")){
-if(!admin) return send(e,{type:"text",text:"権限なし"});
-const id=e.message.mention?.mentionees?.[0]?.userId;
-if(!id) return send(e,{type:"text",text:"メンションして"});
+
+if(!admin){
+  return send(e,{
+    type:"text",
+    text:"権限なし"
+  });
+}
+
+const id =
+  e.message.mention?.mentionees?.[0]?.userId;
+
+if(!id){
+  return send(e,{
+    type:"text",
+    text:"メンションして"
+  });
+}
+
+const rows = await getSheet("ban!A:B");
+
+// 重複防止
+if(rows.some(x => x[0] === g && x[1] === id)){
+  return send(e,{
+    type:"text",
+    text:"既にBAN済み"
+  });
+}
+
 await sheets.spreadsheets.values.append({
 spreadsheetId:sheetId,
 range:"ban!A:B",
 valueInputOption:"RAW",
 requestBody:{values:[[g,id]]}
 });
-return send(e,{type:"text",text:"BAN完了"});
-}
 
+return send(e,{
+type:"text",
+text:"BAN完了"
+});
+}
 // =====================
 // BAN一覧
 // =====================
