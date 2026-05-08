@@ -202,9 +202,12 @@ const hitWord = ngList.find(word =>
   t.includes(word)
 );
 
-if(hitWord){
+if(
+  hitWord &&
+  !instantBanWords.some(word => t.includes(word))
+){
 
-  await send(e,{
+  return send(e,{
     type:"text",
     text:`⚠️ NGワード検知\n「${hitWord}」`
   });
