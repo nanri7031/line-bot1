@@ -161,7 +161,6 @@ const rows = await getSheet("ban!A:B");
 await setSheet("ban!A:B", rows.filter(x=>!(x[0]===g && x[1]===id)));
 return send(e,{type:"text",text:"BAN解除完了"});
 }
-}
   
 // black解除
 if(d.startsWith("black_remove:")){
