@@ -185,7 +185,8 @@ const hitWord = ngList.find(word =>
 );
 
 if(hitWord){
-  await send(e,{
+
+  return send(e,{
     type:"text",
     text:`⚠️ NGワード検知\n「${hitWord}」`
   });
@@ -211,7 +212,6 @@ if(isBanned){
 
   const key = `${g}_${u}`;
 
-  // 初回だけ警告
   if(!global.banNotice[key]){
 
     global.banNotice[key] = true;
@@ -222,7 +222,6 @@ if(isBanned){
     });
   }
 
-  // 2回目以降無視
   return;
 }
 
