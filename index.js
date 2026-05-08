@@ -205,6 +205,36 @@ const isBanned = banRows.some(x =>
   x[0] === g && x[1] === u
 );
 
+global.banNotice ??= {};
+
+if(isBanned){
+
+  const key = `${g}_${u}`;
+
+  // 初回だけ警告
+  if(!global.banNotice[key]){
+
+    global.banNotice[key] = true;
+
+    return send(e,{
+      type:"text",
+      text:"⚠️ BAN対象ユーザー\n管理者は退会処理してください"
+    });
+  }
+
+  // 2回目以降無視
+  return;
+}
+
+// =====================
+// 即BANワード
+// =====================
+const banRows = await getSheet("ban!A:B");
+
+const isBanned = banRows.some(x =>
+  x[0] === g && x[1] === u
+);
+
 if(isBanned){
   return send(e,{
     type:"text",
