@@ -171,6 +171,26 @@ if(e.type!=="message"||e.message.type!=="text") continue;
 const t = e.message.text.trim();
 const cmd = t.toLowerCase();
 
+// =====================
+// NGワード監視
+// =====================
+const ngRows = await getSheet("ng!A:B");
+
+const ngList = ngRows
+  .filter(x => x[0] === g)
+  .map(x => x[1]);
+
+const hitWord = ngList.find(word =>
+  t.includes(word)
+);
+
+if(hitWord){
+  return send(e,{
+    type:"text",
+    text:`⚠️ NGワード検知\n「${hitWord}」`
+  });
+}
+  
 // ===== GID取得 =====
 if(cmd === "gid"){
   return send(e,{
