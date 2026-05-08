@@ -228,22 +228,6 @@ if(isBanned){
 // =====================
 // 即BANワード
 // =====================
-const banRows = await getSheet("ban!A:B");
-
-const isBanned = banRows.some(x =>
-  x[0] === g && x[1] === u
-);
-
-if(isBanned){
-  return send(e,{
-    type:"text",
-    text:"⚠️ BAN対象ユーザー\n管理者は退会処理してください"
-  });
-}
-
-// =====================
-// 即BANワード
-// =====================
 const instantBanWords = [
   "死ね",
   "グロ",
