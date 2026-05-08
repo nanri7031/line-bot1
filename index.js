@@ -630,7 +630,59 @@ contents:[
 }
 });
 }
+  
+// =====================
+// black一覧
+// =====================
+if(cmd==="black一覧"){
 
+const rows = await getSheet("black!A:B");
+
+if(!rows.length){
+  return send(e,{
+    type:"text",
+    text:"なし"
+  });
+}
+
+return send(e,{
+type:"flex",
+altText:"black一覧",
+contents:{
+type:"bubble",
+body:{
+type:"box",
+layout:"vertical",
+contents:[
+{type:"text",text:"black一覧",weight:"bold"},
+
+...rows.map(r=>({
+type:"box",
+layout:"horizontal",
+contents:[
+{
+type:"text",
+text:r[1],
+flex:3,
+wrap:true
+},
+{
+type:"button",
+style:"primary",
+color:"#2E7D32",
+action:{
+type:"postback",
+label:"解除",
+data:`black_remove:${r[1]}`
+}
+}
+]
+}))
+]
+}
+}
+});
+}
 // =====================
 // 連投制限
 // =====================
