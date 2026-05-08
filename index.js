@@ -188,6 +188,15 @@ if(e.type!=="message"||e.message.type!=="text") continue;
 
 const t = e.message.text.trim();
 const cmd = t.toLowerCase();
+  
+// =====================
+// 即BANワード
+// =====================
+const instantBanWords = [
+  "死ね",
+  "グロ",
+  "詐欺"
+];
 
 // =====================
 // NGワード監視
@@ -245,15 +254,6 @@ if(isBanned){
 
   return;
 }
-
-// =====================
-// 即BANワード
-// =====================
-const instantBanWords = [
-  "死ね",
-  "グロ",
-  "詐欺"
-];
 
 const hitInstant = instantBanWords.find(word =>
   t.includes(word)
