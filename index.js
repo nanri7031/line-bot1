@@ -36,6 +36,8 @@ const sendMail = async(subject,text)=>{
     const mails =
       rows.map(x => x[2]).filter(Boolean);
 
+    console.log(mails);
+
     if(!mails.length) return;
 
     await resend.emails.send({
