@@ -6,12 +6,15 @@ import nodemailer from "nodemailer";
 const app = express();
 
 const transporter = nodemailer.createTransport({
-  service:"icloud",
+  host:"smtp.gmail.com",
+  port:587,
+  secure:false,
   auth:{
-    user:"nanri7031@icloud.com",
+    user:process.env.MAIL_USER,
     pass:process.env.MAIL_PASS
   }
 });
+
 // ===== LINE =====
 const config = {
   channelAccessToken: process.env.CHANNEL_ACCESS_TOKEN,
