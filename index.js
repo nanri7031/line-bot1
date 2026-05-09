@@ -1,9 +1,17 @@
 import express from "express";
 import { Client, middleware } from "@line/bot-sdk";
 import { google } from "googleapis";
+import nodemailer from "nodemailer";
 
 const app = express();
 
+const transporter = nodemailer.createTransport({
+  service:"icloud",
+  auth:{
+    user:"nanri7031@icloud.com",
+    pass:process.env.MAIL_PASS
+  }
+});
 // ===== LINE =====
 const config = {
   channelAccessToken: process.env.CHANNEL_ACCESS_TOKEN,
