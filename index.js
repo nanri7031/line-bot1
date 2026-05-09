@@ -41,7 +41,7 @@ const sendMail = async(subject,text)=>{
     if(!mails.length) return;
 
     await resend.emails.send({
-      from:"onboarding@resend.dev",
+      from:"nobu3031@gmail.com",
       to:mails,
       subject,
       text
