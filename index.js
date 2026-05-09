@@ -1,19 +1,11 @@
 import express from "express";
 import { Client, middleware } from "@line/bot-sdk";
 import { google } from "googleapis";
-import nodemailer from "nodemailer";
+import { Resend } from "resend";
 
 const app = express();
 
-const transporter = nodemailer.createTransport({
-  host:"smtp.gmail.com",
-  port:465,
-  secure:true,
-  auth:{
-    user:process.env.MAIL_USER,
-    pass:process.env.MAIL_PASS
-  }
-});
+const resend = new Resend(process.env.RESEND_API_KEY);
 
 // ===== LINE =====
 const config = {
@@ -46,9 +38,9 @@ const sendMail = async(subject,text)=>{
 
     if(!mails.length) return;
 
-    await transporter.sendMail({
-      from:"nanri7031@icloud.com",
-      to:mails.join(","),
+    await resend.emails.send({
+      from:"onboarding@resend.dev",
+      to:mails,
       subject,
       text
     });
