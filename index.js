@@ -956,6 +956,50 @@ return send(e,{
 }
   
 // =====================
+// メール確認
+// =====================
+if(cmd==="メール確認"){
+
+  const rows = await getSheet("mail!A:C");
+
+  const list = rows.filter(x =>
+    x[0] === g && x[1] === u
+  );
+
+  if(!list.length){
+    return send(e,{
+      type:"text",
+      text:"メール未登録"
+    });
+  }
+
+  return send(e,{
+    type:"text",
+    text:`登録メール\n${list[0][2]}`
+  });
+}
+
+// =====================
+// メール削除
+// =====================
+if(cmd==="メール削除"){
+
+  const rows = await getSheet("mail!A:C");
+
+  await setSheet(
+    "mail!A:C",
+    rows.filter(x =>
+      !(x[0] === g && x[1] === u)
+    )
+  );
+
+  return send(e,{
+    type:"text",
+    text:"メール削除完了"
+  });
+}
+  
+// =====================
 // 状態確認
 // =====================
 if(cmd==="状態確認"){
