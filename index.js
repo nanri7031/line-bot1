@@ -911,6 +911,50 @@ if(cmd==="挨拶確認"){
   });
 }
   
+ // =====================
+// メール登録
+// =====================
+if(cmd.startsWith("メール登録")){
+
+if(!admin && !sub){
+  return send(e,{
+    type:"text",
+    text:"権限なし"
+  });
+}
+
+const mail =
+  t.replace("メール登録","").trim();
+
+if(!mail.includes("@")){
+  return send(e,{
+    type:"text",
+    text:"メール形式エラー"
+  });
+}
+
+const rows =
+  await getSheet("emails!A:C");
+
+// 重複更新
+const filtered =
+  rows.filter(x =>
+    !(x[0]===g && x[1]===u)
+  );
+
+filtered.push([g,u,mail]);
+
+await setSheet(
+  "emails!A:C",
+  filtered
+);
+
+return send(e,{
+  type:"text",
+  text:`メール登録完了\n${mail}`
+});
+}
+  
 // =====================
 // 状態確認
 // =====================
