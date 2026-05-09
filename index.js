@@ -26,7 +26,7 @@ const send = async (e, msg) => {
   }
 };
 
-// ===== メール送信 =====
+// ====== メール送信 ======
 const sendMail = async(subject,text)=>{
 
   try{
@@ -41,8 +41,8 @@ const sendMail = async(subject,text)=>{
     if(!mails.length) return;
 
     await resend.emails.send({
-      from:"nobu3031@gmail.com",
-      to:mails,
+      from:"onboarding@resend.dev",
+      to:"nobu3031@gmail.com",
       subject,
       text
     });
