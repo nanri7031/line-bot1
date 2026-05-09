@@ -936,7 +936,7 @@ if(!mail.includes("@")){
 }
 
 const rows =
-  await getSheet("emails!A:C");
+  await getSheet("mail!A:C");
 
 // 重複更新
 const filtered =
@@ -947,7 +947,7 @@ const filtered =
 filtered.push([g,u,mail]);
 
 await setSheet(
-  "emails!A:C",
+  "mail!A:C",
   filtered
 );
 
