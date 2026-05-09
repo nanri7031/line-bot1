@@ -31,6 +31,33 @@ const send = async (e, msg) => {
   }
 };
 
+// ===== メール送信 =====
+const sendMail = async(subject,text)=>{
+
+  try{
+
+    const rows = await getSheet("mail!A:C");
+
+    const mails =
+      rows.map(x => x[2]).filter(Boolean);
+
+    if(!mails.length) return;
+
+    await transporter.sendMail({
+      from:"nanri7031@icloud.com",
+      to:mails.join(","),
+      subject,
+      text
+    });
+
+    console.log("MAIL送信OK");
+
+  }catch(err){
+    console.log("MAIL ERR",err);
+  }
+
+};
+
 // ===== Google =====
 const auth = new google.auth.JWT(
   process.env.GOOGLE_CLIENT_EMAIL,
@@ -593,6 +620,11 @@ try{
   name = p.displayName;
 }catch{}
 
+await sendMail(
+  "通報通知",
+  `通報\n名前:${name}\nユーザーID:${u}\nグループID:${g}`
+);
+  
 return send(e,{
   type:"text",
   text:`通報\n名前:${name}\nユーザーID:${u}\nグループID:${g}`
