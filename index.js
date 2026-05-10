@@ -122,7 +122,7 @@ for(const e of req.body.events){
 // ===== 重複防止 =====
 const eid =
   e.message?.id ||
-  (e.postback?.data ? e.postback.data + Date.now() : null) ||
+  e.postback?.data ||
   JSON.stringify(e);
 if(processed.has(eid)) continue;
 processed.add(eid);
