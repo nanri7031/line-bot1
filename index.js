@@ -45,7 +45,7 @@ if(!mails.length) return;
 
 await resend.emails.send({
 from:"onboarding@resend.dev",
-to:"nobu3031@gmail.com",
+to:mails,
 subject,
 text
 });
@@ -269,6 +269,8 @@ try{
   groupName = summary.groupName;
 }catch{}
 
+try{
+
 await sendMail(
   g,
   "通報通知",
@@ -282,6 +284,12 @@ await sendMail(
 
 ユーザーID:${u}`
 );
+
+}catch(err){
+
+console.log(err);
+
+}
 
 return send(e,{
   type:"text",
