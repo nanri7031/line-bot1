@@ -695,11 +695,6 @@ data:"report:ルール違反"
 type:"postback",
 label:"引抜き",
 data:"report:引抜き"
-},
-{
-type:"postback",
-label:"その他",
-data:"report:その他"
 }
 ]
 }
