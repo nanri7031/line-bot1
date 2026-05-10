@@ -251,6 +251,8 @@ if(d.startsWith("report:")){
 
 const reason = d.split(":")[1];
 
+console.log("REPORT", reason);
+
 let name = u;
 
 try{
