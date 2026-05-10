@@ -26,35 +26,37 @@ const send = async (e, msg) => {
   }
 };
 
-// ====== メール送信 ======
-const sendMail = async(g,subject,text)=>{
+// ===== メール送信 =====
+const sendMail = async(groupId,subject,text)=>{
 
-  try{
+try{
 
-    const rows = await getSheet("mail!A:C");
+const rows = await getSheet("mail!A:C");
 
-    const mails =
-      rows
-        .filter(x => x[0] === g)
-        .map(x => x[2])
-        .filter(Boolean);
+const mails =
+rows
+.filter(x => x[0] === groupId)
+.map(x => x[2])
+.filter(Boolean);
 
-    console.log(mails);
+console.log(mails);
 
-    if(!mails.length) return;
+if(!mails.length) return;
 
-    await resend.emails.send({
-      from:"onboarding@resend.dev",
-      to:mails,
-      subject,
-      text
-    });
+await resend.emails.send({
+from:"onboarding@resend.dev",
+to:mails,
+subject,
+text
+});
 
-    console.log("MAIL送信OK");
+console.log("MAIL送信OK");
 
-  }catch(err){
-    console.log("MAIL ERR",err);
-  }
+}catch(err){
+
+console.log("MAIL ERR",err);
+
+}
 
 };
 
