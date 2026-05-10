@@ -243,7 +243,50 @@ return send(e,{
   text:"black解除完了"
 });
 }
+  
+// 通報
+if(d.startsWith("report:")){
 
+const reason = d.split(":")[1];
+
+let name = u;
+
+try{
+  const p =
+    await client.getGroupMemberProfile(g,u);
+
+  name = p.displayName;
+}catch{}
+
+let groupName = g;
+
+try{
+  const summary =
+    await client.getGroupSummary(g);
+
+  groupName = summary.groupName;
+}catch{}
+
+await sendMail(
+  g,
+  "通報通知",
+  `通報通知
+
+グループ:${groupName}
+
+理由:${reason}
+
+通報者:${name}
+
+ユーザーID:${u}`
+);
+
+return send(e,{
+  type:"text",
+  text:"通報しました。"
+});
+
+}
 } // ← POSTBACK終了
 
 // =====================
@@ -611,39 +654,45 @@ contents:{type:"bubble",body:{type:"box",layout:"vertical",contents:[
 }
 
 // =====================
-// 通報（無料修正）
+// 通報
 // =====================
 if(cmd==="通報"){
 
-let name = u;
-
-try{
-  const p = await client.getGroupMemberProfile(g,u);
-  name = p.displayName;
-}catch{}
-
-let groupName = g;
-
-try{
-  const summary = await client.getGroupSummary(g);
-  groupName = summary.groupName;
-}catch{}
-
-await sendMail(
-  g,
-  "通報通知",
-  `通報通知
-
-グループ:${groupName}
-
-名前:${name}
-
-ユーザーID:${u}`
-);
-
 return send(e,{
-  type:"text",
-  text:"通報しました。"
+type:"template",
+altText:"通報",
+template:{
+type:"buttons",
+title:"通報理由",
+text:"理由を選択してください",
+actions:[
+{
+type:"postback",
+label:"荒らし",
+data:"report:荒らし"
+},
+{
+type:"postback",
+label:"解体",
+data:"report:解体"
+},
+{
+type:"postback",
+label:"ルール違反",
+data:"report:ルール違反"
+},
+{
+type:"postback",
+label:"引抜き",
+data:"report:引抜き"
+},
+{
+type:"postback",
+label:"その他",
+data:"report:その他"
+}
+]
+}
 });
 
 }
