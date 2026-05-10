@@ -27,14 +27,17 @@ const send = async (e, msg) => {
 };
 
 // ====== メール送信 ======
-const sendMail = async(subject,text)=>{
+const sendMail = async(g,subject,text)=>{
 
   try{
 
     const rows = await getSheet("mail!A:C");
 
     const mails =
-      rows.map(x => x[2]).filter(Boolean);
+      rows
+        .filter(x => x[0] === g)
+        .map(x => x[2])
+        .filter(Boolean);
 
     console.log(mails);
 
@@ -42,7 +45,7 @@ const sendMail = async(subject,text)=>{
 
     await resend.emails.send({
       from:"onboarding@resend.dev",
-      to:"nobu3031@gmail.com",
+      to:mails,
       subject,
       text
     });
@@ -611,21 +614,38 @@ contents:{type:"bubble",body:{type:"box",layout:"vertical",contents:[
 // 通報（無料修正）
 // =====================
 if(cmd==="通報"){
+
 let name = u;
+
 try{
   const p = await client.getGroupMemberProfile(g,u);
   name = p.displayName;
 }catch{}
 
+let groupName = g;
+
+try{
+  const summary = await client.getGroupSummary(g);
+  groupName = summary.groupName;
+}catch{}
+
 await sendMail(
+  g,
   "通報通知",
-  `通報\n名前:${name}\nユーザーID:${u}\nグループID:${g}`
+  `通報通知
+
+グループ:${groupName}
+
+名前:${name}
+
+ユーザーID:${u}`
 );
-  
+
 return send(e,{
   type:"text",
-  text:`通報\n名前:${name}\nユーザーID:${u}\nグループID:${g}`
+  text:"通報しました。"
 });
+
 }
 
 // =====================
