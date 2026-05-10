@@ -44,8 +44,8 @@ console.log(mails);
 if(!mails.length) return;
 
 await resend.emails.send({
-from:"Acme <onboarding@resend.dev>",
-to:mails,
+from:"onboarding@resend.dev",
+to:"nobu3031@gmail.com",
 subject,
 text
 });
