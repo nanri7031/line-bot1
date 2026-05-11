@@ -300,7 +300,33 @@ return send(e,{
 
 }
 } // ← POSTBACK終了
+  
+// =====================
+// 新規参加挨拶
+// =====================
+if(e.type==="memberJoined"){
 
+const rows = await getSheet("settings!A:D");
+
+const setting =
+  rows.find(x => x[0] === g);
+
+if(setting?.[2] !== "ON") continue;
+
+const msg =
+  setting?.[3] || "ようこそ！";
+
+await client.replyMessage(
+  e.replyToken,
+  {
+    type:"text",
+    text:msg
+  }
+);
+
+continue;
+}
+  
 // =====================
 // MESSAGE
 // =====================
