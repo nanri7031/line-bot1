@@ -334,16 +334,6 @@ if(e.type!=="message"||e.message.type!=="text") continue;
 
 const t = e.message.text.trim();
 const cmd = t.toLowerCase();
-
-// ===== 一般メンバー制限 =====
-if(
-!admin &&
-!sub &&
-cmd !== "menu" &&
-cmd !== "通報"
-){
-continue;
-}
   
 // =====================
 // 即BANワード
