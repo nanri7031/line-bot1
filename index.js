@@ -452,6 +452,10 @@ if(hitInstant){
 // =====================
 // 連投監視
 // =====================
+if(admin || sub){
+continue;
+}
+  
 global.floodMap ??= {};
 
 if(!global.floodMap[g]){
