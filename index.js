@@ -335,12 +335,24 @@ if(e.type!=="message"||e.message.type!=="text") continue;
 const t = e.message.text.trim();
 const cmd = t.toLowerCase();
   
-// ===== 一般メンバー制限 =====
+// ===== 管理コマンド一覧 =====
+const adminCommands = [
+"管理",
+"副管理",
+"ng",
+"ban",
+"black",
+"連投",
+"メール",
+"挨拶",
+"状態確認"
+];
+
+// 一般メンバー制限
 if(
 !admin &&
 !sub &&
-cmd !== "menu" &&
-cmd !== "通報"
+adminCommands.some(x => cmd.startsWith(x.toLowerCase()))
 ){
 return send(e,{
 type:"text",
