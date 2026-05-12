@@ -452,10 +452,9 @@ if(hitInstant){
 // =====================
 // 連投監視
 // =====================
-if(admin || sub){
-continue;
-}
-  
+// 管理者は連投除外
+if(!admin && !sub){
+
 global.floodMap ??= {};
 
 if(!global.floodMap[g]){
@@ -487,7 +486,6 @@ const limit =
 // 連投BAN
 if(global.floodMap[g][u].length >= limit){
 
-  // BAN登録
   if(!banRows.some(x =>
     x[0] === g && x[1] === u
   )){
@@ -501,7 +499,6 @@ if(global.floodMap[g][u].length >= limit){
     });
   }
 
-  // ブラックリスト保存
   if(!blackRows.some(x => x[1] === u)){
     await sheets.spreadsheets.values.append({
       spreadsheetId:sheetId,
@@ -517,6 +514,9 @@ if(global.floodMap[g][u].length >= limit){
     type:"text",
     text:"⚠️ 連投BAN\n管理者は退会処理してください"
   });
+}
+
+}
 }
 
 // ===== GID取得 =====
