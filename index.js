@@ -507,7 +507,6 @@ if(global.floodMap[g][u].length >= limit){
 }
 
 }
-}
 
 // ===== GID取得 =====
 if(cmd === "gid"){
