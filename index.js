@@ -334,6 +334,74 @@ if(e.type!=="message"||e.message.type!=="text") continue;
   
 const t = e.message.text.trim();
 const cmd = t.toLowerCase();
+
+// =====================
+// 活動記録
+// =====================
+const activityRows =
+  await getSheet("activity!A:G");
+
+let userName = u;
+
+try{
+  const p =
+    await client.getGroupMemberProfile(g,u);
+
+  userName = p.displayName;
+}catch{}
+
+const nowDate =
+  new Date().toISOString();
+
+let foundActivity = false;
+
+for(let i=0;i<activityRows.length;i++){
+
+  if(
+    activityRows[i][0] === g &&
+    activityRows[i][1] === u
+  ){
+
+    activityRows[i][2] = userName;
+
+    activityRows[i][3] =
+      String(
+        Number(activityRows[i][3] || 0) + 1
+      );
+
+    activityRows[i][4] = nowDate;
+
+    activityRows[i][5] =
+      String(
+        Number(activityRows[i][5] || 0) + 1
+      );
+
+    activityRows[i][6] =
+      String(
+        Number(activityRows[i][6] || 0) + 1
+      );
+
+    foundActivity = true;
+  }
+}
+
+if(!foundActivity){
+
+  activityRows.push([
+    g,
+    u,
+    userName,
+    "1",
+    nowDate,
+    "1",
+    "1"
+  ]);
+}
+
+await setSheet(
+  "activity!A:G",
+  activityRows
+);
   
 // ===== 管理コマンド一覧 =====
 const adminCommands = [
