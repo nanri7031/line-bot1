@@ -1235,6 +1235,155 @@ if(cmd==="メール削除"){
     text:"メール削除完了"
   });
 }
+
+// =====================
+// 活動ランキング
+// =====================
+if(cmd==="活動ランキング"){
+
+const rows =
+  await getSheet("activity!A:G");
+
+const list =
+  rows
+  .filter(x => x[0] === g)
+  .sort((a,b)=>
+    Number(b[3]) - Number(a[3])
+  )
+  .slice(0,10);
+
+if(!list.length){
+  return send(e,{
+    type:"text",
+    text:"データなし"
+  });
+}
+
+const contents = list.map((r,i)=>{
+
+const days =
+Math.floor(
+(
+Date.now() -
+new Date(r[4]).getTime()
+)
+/86400000
+);
+
+let medal = "🏅";
+
+if(i===0) medal = "🥇";
+if(i===1) medal = "🥈";
+if(i===2) medal = "🥉";
+
+return{
+type:"box",
+layout:"vertical",
+margin:"lg",
+paddingAll:"12px",
+backgroundColor:"#FFF3E0",
+cornerRadius:"12px",
+contents:[
+
+{
+type:"text",
+text:`${medal} ${i+1}位`,
+weight:"bold",
+color:"#E65100",
+size:"sm"
+},
+
+{
+type:"text",
+text:r[2],
+weight:"bold",
+size:"lg",
+margin:"sm",
+wrap:true
+},
+
+{
+type:"box",
+layout:"baseline",
+margin:"md",
+contents:[
+{
+type:"text",
+text:"発言",
+size:"sm",
+color:"#777777",
+flex:2
+},
+{
+type:"text",
+text:`${r[3]}件`,
+size:"sm",
+color:"#FB8C00",
+align:"end",
+weight:"bold",
+flex:3
+}
+]
+},
+
+{
+type:"box",
+layout:"baseline",
+margin:"sm",
+contents:[
+{
+type:"text",
+text:"最終発言",
+size:"sm",
+color:"#777777",
+flex:2
+},
+{
+type:"text",
+text:`${days}日前`,
+size:"sm",
+color:"#EF6C00",
+align:"end",
+weight:"bold",
+flex:3
+}
+]
+}
+
+]
+};
+
+});
+
+return send(e,{
+type:"flex",
+altText:"活動ランキング",
+contents:{
+type:"bubble",
+hero:{
+type:"box",
+layout:"vertical",
+backgroundColor:"#FB8C00",
+paddingAll:"20px",
+contents:[
+{
+type:"text",
+text:"📊 活動ランキング",
+color:"#FFFFFF",
+weight:"bold",
+size:"xl",
+align:"center"
+}
+]
+},
+body:{
+type:"box",
+layout:"vertical",
+contents
+}
+}
+});
+}
   
 // =====================
 // 状態確認
