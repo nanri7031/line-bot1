@@ -330,9 +330,10 @@ continue;
 // =====================
 // MESSAGE
 // =====================
-if(e.type!=="message"||e.message.type!=="text") continue;
+if(e.type!=="message") continue;
   
-const t = e.message.text.trim();
+const t = e.message.text?.trim() || "";
+
 const cmd = t.toLowerCase();
 
 // =====================
