@@ -1384,6 +1384,363 @@ contents
 }
 });
 }
+
+// =====================
+// 未活動ランキング
+// =====================
+if(cmd==="未活動ランキング"){
+
+const rows =
+  await getSheet("activity!A:G");
+
+const list =
+  rows
+  .filter(x => x[0] === g)
+  .sort((a,b)=>
+    new Date(a[4]) -
+    new Date(b[4])
+  )
+  .slice(0,10);
+
+if(!list.length){
+  return send(e,{
+    type:"text",
+    text:"データなし"
+  });
+}
+
+const contents = list.map((r,i)=>{
+
+const days =
+Math.floor(
+(
+Date.now() -
+new Date(r[4]).getTime()
+)
+/86400000
+);
+
+return{
+type:"box",
+layout:"horizontal",
+margin:"md",
+contents:[
+{
+type:"text",
+text:r[2],
+flex:3,
+wrap:true
+},
+{
+type:"text",
+text:`${days}日`,
+flex:2,
+align:"end",
+color:"#E65100",
+weight:"bold"
+}
+]
+};
+
+});
+
+return send(e,{
+type:"flex",
+altText:"未活動ランキング",
+contents:{
+type:"bubble",
+hero:{
+type:"box",
+layout:"vertical",
+backgroundColor:"#FF9800",
+paddingAll:"20px",
+contents:[
+{
+type:"text",
+text:"😴 未活動ランキング",
+color:"#FFFFFF",
+weight:"bold",
+size:"xl",
+align:"center"
+}
+]
+},
+body:{
+type:"box",
+layout:"vertical",
+contents
+}
+}
+});
+}  
+
+// =====================
+// 週間ランキング
+// =====================
+if(cmd==="週間ランキング"){
+
+const rows =
+  await getSheet("activity!A:G");
+
+const list =
+  rows
+  .filter(x => x[0] === g)
+  .sort((a,b)=>
+    Number(b[5]) - Number(a[5])
+  )
+  .slice(0,10);
+
+if(!list.length){
+  return send(e,{
+    type:"text",
+    text:"データなし"
+  });
+}
+
+const contents = list.map((r,i)=>{
+
+return{
+type:"box",
+layout:"horizontal",
+margin:"md",
+contents:[
+{
+type:"text",
+text:`${i+1}位`,
+flex:1,
+color:"#FB8C00",
+weight:"bold"
+},
+{
+type:"text",
+text:r[2],
+flex:3,
+wrap:true
+},
+{
+type:"text",
+text:`${r[5]}件`,
+flex:2,
+align:"end",
+color:"#E65100",
+weight:"bold"
+}
+]
+};
+
+});
+
+return send(e,{
+type:"flex",
+altText:"週間ランキング",
+contents:{
+type:"bubble",
+hero:{
+type:"box",
+layout:"vertical",
+backgroundColor:"#FB8C00",
+paddingAll:"20px",
+contents:[
+{
+type:"text",
+text:"🔥 週間ランキング",
+color:"#FFFFFF",
+weight:"bold",
+size:"xl",
+align:"center"
+}
+]
+},
+body:{
+type:"box",
+layout:"vertical",
+contents
+}
+}
+});
+} 
+
+// =====================
+// 月間ランキング
+// =====================
+if(cmd==="月間ランキング"){
+
+const rows =
+  await getSheet("activity!A:G");
+
+const list =
+  rows
+  .filter(x => x[0] === g)
+  .sort((a,b)=>
+    Number(b[6]) - Number(a[6])
+  )
+  .slice(0,10);
+
+if(!list.length){
+  return send(e,{
+    type:"text",
+    text:"データなし"
+  });
+}
+
+const contents = list.map((r,i)=>{
+
+return{
+type:"box",
+layout:"horizontal",
+margin:"md",
+contents:[
+{
+type:"text",
+text:`${i+1}位`,
+flex:1,
+color:"#FB8C00",
+weight:"bold"
+},
+{
+type:"text",
+text:r[2],
+flex:3,
+wrap:true
+},
+{
+type:"text",
+text:`${r[6]}件`,
+flex:2,
+align:"end",
+color:"#E65100",
+weight:"bold"
+}
+]
+};
+
+});
+
+return send(e,{
+type:"flex",
+altText:"月間ランキング",
+contents:{
+type:"bubble",
+hero:{
+type:"box",
+layout:"vertical",
+backgroundColor:"#EF6C00",
+paddingAll:"20px",
+contents:[
+{
+type:"text",
+text:"👑 月間ランキング",
+color:"#FFFFFF",
+weight:"bold",
+size:"xl",
+align:"center"
+}
+]
+},
+body:{
+type:"box",
+layout:"vertical",
+contents
+}
+}
+});
+}
+
+// =====================
+// ROM専一覧
+// =====================
+if(cmd==="rom専一覧"){
+
+const rows =
+  await getSheet("activity!A:G");
+
+const list =
+  rows.filter(r=>{
+
+const days =
+Math.floor(
+(
+Date.now() -
+new Date(r[4]).getTime()
+)
+/86400000
+);
+
+return days >= 30;
+
+});
+
+if(!list.length){
+  return send(e,{
+    type:"text",
+    text:"ROM専なし"
+  });
+}
+
+const contents = list.map(r=>{
+
+const days =
+Math.floor(
+(
+Date.now() -
+new Date(r[4]).getTime()
+)
+/86400000
+);
+
+return{
+type:"box",
+layout:"horizontal",
+margin:"md",
+contents:[
+{
+type:"text",
+text:r[2],
+flex:3,
+wrap:true
+},
+{
+type:"text",
+text:`${days}日`,
+flex:2,
+align:"end",
+color:"#D84315",
+weight:"bold"
+}
+]
+};
+
+});
+
+return send(e,{
+type:"flex",
+altText:"ROM専一覧",
+contents:{
+type:"bubble",
+hero:{
+type:"box",
+layout:"vertical",
+backgroundColor:"#F57C00",
+paddingAll:"20px",
+contents:[
+{
+type:"text",
+text:"👻 ROM専一覧",
+color:"#FFFFFF",
+weight:"bold",
+size:"xl",
+align:"center"
+}
+]
+},
+body:{
+type:"box",
+layout:"vertical",
+contents
+}
+}
+});
+}
   
 // =====================
 // 状態確認
