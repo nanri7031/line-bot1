@@ -339,6 +339,7 @@ const cmd = t.toLowerCase();
 // =====================
 // 活動記録
 // =====================
+
 const activityRows =
   await getSheet("activity!A:G");
 
@@ -354,51 +355,60 @@ try{
 const nowDate =
   new Date().toISOString();
 
-let foundActivity = false;
+let foundRow = -1;
 
+// 既存検索
 for(let i=0;i<activityRows.length;i++){
 
   if(
     activityRows[i][0] === g &&
     activityRows[i][1] === u
   ){
-
-    activityRows[i][2] = userName;
-
-    activityRows[i][3] =
-      String(
-        Number(activityRows[i][3] || 0) + 1
-      );
-
-    activityRows[i][4] = nowDate;
-
-    activityRows[i][5] =
-      String(
-        Number(activityRows[i][5] || 0) + 1
-      );
-
-    activityRows[i][6] =
-      String(
-        Number(activityRows[i][6] || 0) + 1
-      );
-
-    foundActivity = true;
+    foundRow = i;
+    break;
   }
 }
 
-if(!foundActivity){
+// 既存更新
+if(foundRow >= 0){
 
+  const row =
+    activityRows[foundRow];
+
+  const total =
+    Number(row[3] || 0) + 1;
+
+  const week =
+    Number(row[5] || 0) + 1;
+
+  const month =
+    Number(row[6] || 0) + 1;
+
+  activityRows[foundRow] = [
+    g,
+    u,
+    userName,
+    total,
+    nowDate,
+    week,
+    month
+  ];
+
+}else{
+
+  // 新規追加
   activityRows.push([
     g,
     u,
     userName,
-    "1",
+    1,
     nowDate,
-    "1",
-    "1"
+    1,
+    1
   ]);
 }
 
+// activity保存
 await setSheet(
   "activity!A:G",
   activityRows
