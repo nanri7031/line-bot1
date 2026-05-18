@@ -48,12 +48,26 @@ console.log("TARGET MAILS:", mails);
 
 if(!mails.length) return;
 
-await resend.emails.send({
-from:"BOT通知 <onboarding@resend.dev>",
-to:[mails[0]],
-subject,
-text
-});
+for(const mail of mails){
+
+  try{
+
+    await resend.emails.send({
+      from:"BOT通知 <onboarding@resend.dev>",
+      to:[mail],
+      subject,
+      text
+    });
+
+    console.log("MAIL OK:", mail);
+
+  }catch(err){
+
+    console.log("MAIL ERR:", mail, err);
+
+  }
+
+}
 
 console.log("MAIL送信OK");
 
