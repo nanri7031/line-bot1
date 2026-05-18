@@ -49,7 +49,7 @@ console.log("TARGET MAILS:", mails);
 if(!mails.length) return;
 
 await resend.emails.send({
-from:"onboarding@resend.dev",
+from:"BOT通知 <onboarding@resend.dev>",
 to:mails,
 subject,
 text
