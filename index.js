@@ -333,15 +333,19 @@ if(!leftUser) continue;
 
 let leftName = leftUser;
 
-try{
-  const p =
-    await client.getGroupMemberProfile(
-      g,
-      leftUser
-    );
+// activityから名前取得
+const activityRows =
+  await getSheet("activity!A:G");
 
-  leftName = p.displayName;
-}catch{}
+const activityUser =
+  activityRows.find(x =>
+    x[0] === g &&
+    x[1] === leftUser
+  );
+
+if(activityUser?.[2]){
+  leftName = activityUser[2];
+}
 
 // =====================
 // 退出ログ保存
