@@ -35,11 +35,16 @@ const rows = await getSheet("mail!A:C");
 
 const mails =
 rows
-.filter(x => x[0] === groupId)
+.filter(x =>
+  String(x[0]).trim() ===
+  String(groupId).trim()
+)
 .map(x => x[2])
 .filter(Boolean);
 
-console.log(mails);
+console.log("SEND GROUP:", groupId);
+console.log("MAIL ROWS:", rows);
+console.log("TARGET MAILS:", mails);
 
 if(!mails.length) return;
 
