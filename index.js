@@ -362,7 +362,7 @@ return send(e,{
 if(e.type==="memberLeft"){
 
 const leftUser =
-  e.left？.members?.[0]?.userId;
+  e.left?.members?.[0]?.userId;
 
 if(!leftUser) continue;
 
