@@ -192,6 +192,13 @@ text:"管理追加完了"
 
 // 管理削除
 if(d.startsWith("admin_delete:")){
+
+if(!admin){
+  return send(e,{
+    type:"text",
+    text:"権限なし"
+  });
+}
 const id = d.split(":")[1];
 const rows = await getSheet("admins!A:B");
 await setSheet("admins!A:B", rows.filter(x=>!(x[0]===g && x[1]===id)));
@@ -200,6 +207,13 @@ return send(e,{type:"text",text:"管理削除完了"});
 
 // 副管理追加
 if(d.startsWith("sub_add:")){
+
+if(!admin){
+  return send(e,{
+    type:"text",
+    text:"権限なし"
+  });
+}
 const id = d.split(":")[1];
 
 const rows = await getSheet("subs!A:B");
@@ -235,6 +249,13 @@ return send(e,{type:"text",text:"副管理削除完了"});
 
 // NG削除
 if(d.startsWith("ng_delete:")){
+
+if(!admin && !sub){
+  return send(e,{
+    type:"text",
+    text:"権限なし"
+  });
+}
 const word = d.split(":")[1];
 const rows = await getSheet("ng!A:B");
 await setSheet("ng!A:B", rows.filter(x=>!(x[0]===g && x[1]===word)));
@@ -243,6 +264,13 @@ return send(e,{type:"text",text:"NG削除完了"});
 
 // BAN解除
 if(d.startsWith("ban_remove:")){
+
+if(!admin){
+  return send(e,{
+    type:"text",
+    text:"権限なし"
+  });
+}
 const id = d.split(":")[1];
 const rows = await getSheet("ban!A:B");
 await setSheet("ban!A:B", rows.filter(x=>!(x[0]===g && x[1]===id)));
@@ -251,6 +279,13 @@ return send(e,{type:"text",text:"BAN解除完了"});
   
 // black解除
 if(d.startsWith("black_remove:")){
+
+if(!admin){
+  return send(e,{
+    type:"text",
+    text:"権限なし"
+  });
+}
 const id = d.split(":")[1];
 
 const rows = await getSheet("black!A:B");
@@ -327,7 +362,7 @@ return send(e,{
 if(e.type==="memberLeft"){
 
 const leftUser =
-  e.left.members?.[0]?.userId;
+  e.left？.members?.[0]?.userId;
 
 if(!leftUser) continue;
 
