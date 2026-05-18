@@ -320,7 +320,135 @@ return send(e,{
 
 }
 } // ← POSTBACK終了
-  
+
+// =====================
+// 退出検知
+// =====================
+if(e.type==="memberLeft"){
+
+const leftUser =
+  e.left.members?.[0]?.userId;
+
+if(!leftUser) continue;
+
+let leftName = leftUser;
+
+try{
+  const p =
+    await client.getGroupMemberProfile(
+      g,
+      leftUser
+    );
+
+  leftName = p.displayName;
+}catch{}
+
+// =====================
+// 退出ログ保存
+// =====================
+await sheets.spreadsheets.values.append({
+spreadsheetId:sheetId,
+range:"leaveLog!A:D",
+valueInputOption:"RAW",
+requestBody:{
+values:[[
+new Date().toISOString(),
+g,
+leftUser,
+leftName
+]]
+}
+});
+
+// =====================
+// 管理者確認
+// =====================
+const adminRows =
+  await getSheet("admins!A:B");
+
+const subRows =
+  await getSheet("subs!A:B");
+
+const isLeftAdmin =
+  adminRows.some(x =>
+    x[0] === g &&
+    x[1] === leftUser
+  );
+
+const isLeftSub =
+  subRows.some(x =>
+    x[0] === g &&
+    x[1] === leftUser
+  );
+
+// =====================
+// 解体検知
+// =====================
+global.leaveLogs ??= {};
+
+if(!global.leaveLogs[g]){
+  global.leaveLogs[g] = [];
+}
+
+const now = Date.now();
+
+global.leaveLogs[g] =
+  global.leaveLogs[g]
+    .filter(x => now - x < 60000);
+
+global.leaveLogs[g].push(now);
+
+if(global.leaveLogs[g].length >= 3){
+
+await client.pushMessage(g,{
+type:"text",
+text:
+"⚠️ 短時間大量退出検知\n解体・荒らしの可能性があります"
+});
+
+}
+
+// =====================
+// 管理側退出警告
+// =====================
+if(isLeftAdmin || isLeftSub){
+
+await client.pushMessage(g,{
+type:"template",
+altText:"管理側退出検知",
+template:{
+type:"buttons",
+title:"⚠️ 管理側退出",
+text:
+`${leftName} が退出しました`,
+actions:[
+
+{
+type:"message",
+label:"通報",
+text:"通報"
+},
+
+{
+type:"message",
+label:"BAN追加",
+text:"BAN追加"
+},
+
+{
+type:"message",
+label:"black一覧",
+text:"black一覧"
+}
+
+]
+}
+});
+
+}
+
+continue;
+}
 // =====================
 // 新規参加挨拶
 // =====================
