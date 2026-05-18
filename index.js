@@ -50,7 +50,7 @@ if(!mails.length) return;
 
 await resend.emails.send({
 from:"BOT通知 <onboarding@resend.dev>",
-to:mails,
+to:[mails[0]],
 subject,
 text
 });
