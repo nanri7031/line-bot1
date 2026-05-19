@@ -52,14 +52,15 @@ for(const mail of mails){
 
   try{
 
-    await resend.emails.send({
-      from:"BOT通知 <onboarding@resend.dev>",
-      to:[mail],
-      subject,
-      text
-    });
+    const result =
+  await resend.emails.send({
+    from:"BOT通知 <onboarding@resend.dev>",
+    to:[mail],
+    subject,
+    text
+  });
 
-    console.log("MAIL OK:", mail);
+console.log("MAIL RESULT:", result);
 
   }catch(err){
 
