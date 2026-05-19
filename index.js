@@ -1847,7 +1847,7 @@ contents
 // =====================
 // ROM専一覧
 // =====================
-if(cmd==="rom専一覧"){
+if(t==="ROM専一覧"){
 
 const rows =
   await getSheet("activity!A:G");
