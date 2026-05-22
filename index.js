@@ -596,6 +596,12 @@ if(foundRow >= 0){
   ]);
 }
 
+// backup保存
+await setSheet(
+  "activity_backup!A:G",
+  activityRows
+);
+
 // activity保存
 await setSheet(
   "activity!A:G",
