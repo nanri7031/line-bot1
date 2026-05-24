@@ -1449,13 +1449,29 @@ if(cmd==="活動ランキング"){
 const rows =
   await getSheet("activity!A:G");
 
+const unique = {};
+
+rows
+.filter(x => x[0] === g)
+.forEach(r => {
+
+  const key = r[1];
+
+  if(
+    !unique[key] ||
+    Number(r[3]) > Number(unique[key][3])
+  ){
+    unique[key] = r;
+  }
+
+});
+
 const list =
-  rows
-  .filter(x => x[0] === g)
-  .sort((a,b)=>
-    Number(b[3]) - Number(a[3])
-  )
-  .slice(0,10);
+Object.values(unique)
+.sort((a,b)=>
+  Number(b[3]) - Number(a[3])
+)
+.slice(0,10);
 
 if(!list.length){
   return send(e,{
