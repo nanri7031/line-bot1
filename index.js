@@ -596,11 +596,29 @@ if(foundRow >= 0){
   ]);
 }
 
-// backup保存
-await setSheet(
-  "activity_backup!A:G",
-  activityRows
-);
+// backup追記保存
+await sheets.spreadsheets.values.append({
+  spreadsheetId: sheetId,
+  range: "activity_backup!A:G",
+  valueInputOption: "RAW",
+  requestBody:{
+    values:[[
+      g,
+      u,
+      userName,
+      foundRow >= 0
+        ? Number(activityRows[foundRow][3])
+        : 1,
+      nowDate,
+      foundRow >= 0
+        ? Number(activityRows[foundRow][5])
+        : 1,
+      foundRow >= 0
+        ? Number(activityRows[foundRow][6])
+        : 1
+    ]]
+  }
+});
 
 // activity保存
 await setSheet(
