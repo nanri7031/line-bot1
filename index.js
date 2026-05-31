@@ -655,73 +655,12 @@ await setSheet(
   "total_activity!A:D",
   totalRows
 );
-
-const totalRows =
-  await getSheet("total_activity!A:D");
-
-const totalIndex =
-  totalRows.findIndex(x =>
-    x[0] === g &&
-    x[1] === u
-  );
-
-if(totalIndex >= 0){
-
-  totalRows[totalIndex][3] =
-    Number(totalRows[totalIndex][3] || 0) + 1;
-
-}else{
-
-  totalRows.push([
-    g,
-    u,
-    userName,
-    1
-  ]);
-
-}
-
-await setSheet(
-  "total_activity!A:D",
-  totalRows
-);
   
 // =====================
 // 総発言数保存
 // =====================
 
-const totalRows =
-  await getSheet("total_activity!A:D");
 
-const totalIndex =
-  totalRows.findIndex(x =>
-    x[0] === g &&
-    x[1] === u
-  );
-
-if(totalIndex >= 0){
-
-  totalRows[totalIndex][2] =
-    userName;
-
-  totalRows[totalIndex][3] =
-    Number(totalRows[totalIndex][3] || 0) + 1;
-
-}else{
-
-  totalRows.push([
-    g,
-    u,
-    userName,
-    1
-  ]);
-
-}
-
-await setSheet(
-  "total_activity!A:D",
-  totalRows
-);
   
 // ===== 管理コマンド一覧 =====
 const adminCommands = [
