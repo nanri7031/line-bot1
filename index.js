@@ -2067,6 +2067,50 @@ return send(e,{
 }
   
 // =====================
+// 総発言移行
+// =====================
+if(cmd==="総発言移行"){
+
+const rows =
+  await getSheet("activity_backup!A:G");
+
+const result = {};
+
+rows.forEach(r => {
+
+  const key =
+    `${r[0]}_${r[1]}`;
+
+  const count =
+    Number(r[3] || 0);
+
+  if(
+    !result[key] ||
+    count > result[key][3]
+  ){
+    result[key] = [
+      r[0],
+      r[1],
+      r[2],
+      count
+    ];
+  }
+
+});
+
+await setSheet(
+  "total_activity!A:D",
+  Object.values(result)
+);
+
+return send(e,{
+  type:"text",
+  text:"総発言移行完了"
+});
+
+}
+  
+// =====================
 // 状態確認
 // =====================
 if(cmd==="状態確認"){
