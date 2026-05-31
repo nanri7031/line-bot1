@@ -625,6 +625,43 @@ await setSheet(
   "activity!A:G",
   activityRows
 );
+
+// =====================
+// 総発言数保存
+// =====================
+
+const totalRows =
+  await getSheet("total_activity!A:D");
+
+const totalIndex =
+  totalRows.findIndex(x =>
+    x[0] === g &&
+    x[1] === u
+  );
+
+if(totalIndex >= 0){
+
+  totalRows[totalIndex][2] =
+    userName;
+
+  totalRows[totalIndex][3] =
+    Number(totalRows[totalIndex][3] || 0) + 1;
+
+}else{
+
+  totalRows.push([
+    g,
+    u,
+    userName,
+    1
+  ]);
+
+}
+
+await setSheet(
+  "total_activity!A:D",
+  totalRows
+);
   
 // ===== 管理コマンド一覧 =====
 const adminCommands = [
@@ -1979,6 +2016,55 @@ contents
 }
 }
 });
+}
+
+// =====================
+// 総発言ランキング
+// =====================
+if(cmd==="総発言ランキング"){
+
+const rows =
+  await getSheet("total_activity!A:D");
+
+const list =
+  rows
+  .filter(x => x[0] === g)
+  .sort((a,b)=>
+    Number(b[3]) - Number(a[3])
+  )
+  .slice(0,10);
+
+if(!list.length){
+  return send(e,{
+    type:"text",
+    text:"総発言データなし"
+  });
+}
+
+let text = "🏆 総発言ランキング\n\n";
+
+list.forEach((r,i)=>{
+
+  let medal = "🏅";
+
+  if(i===0) medal = "🥇";
+  if(i===1) medal = "🥈";
+  if(i===2) medal = "🥉";
+
+  text +=
+`${medal} ${i+1}位
+${r[2]}
+総発言:${r[3]}回
+
+`;
+
+});
+
+return send(e,{
+  type:"text",
+  text
+});
+
 }
   
 // =====================
